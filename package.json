@@ -1,0 +1,88 @@
+{
+  "name": "locione-desk",
+  "version": "0.9.0-beta.1",
+  "description": "Aplicativo financeiro pessoal desktop offline",
+  "main": "electron-dist/main.js",
+  "type": "module",
+  "scripts": {
+    "dev:web": "vite --host 127.0.0.1 --port 1420 --strictPort",
+    "dev:web:free": "kill-port 1420; vite --host 127.0.0.1 --port 1420 --strictPort",
+    "dev": "pnpm run dev:electron",
+    "dev:electron": "concurrently -k --names \"WEB,ELECTRON\" -c \"cyan,magenta\" \"pnpm run dev:web:free\" \"pnpm run wait:web && pnpm run electron:dev\"",
+    "wait:web": "wait-on -l -t 120000 http-get://127.0.0.1:1420/",
+    "electron:build": "tsc -p electron/tsconfig.json && tsc -p electron/tsconfig.preload.json && node -e \"const fs=require('fs'); if(fs.existsSync('electron-dist/preload.js')) fs.renameSync('electron-dist/preload.js','electron-dist/preload.cjs');\"",
+    "electron:dev": "pnpm run electron:build && electron electron-dist/main.js",
+    "electron:dev:direct": "electron electron-dist/main.js",
+    "build:web": "vite build",
+    "prepack": "pnpm icons:generate",
+    "build": "pnpm run build:web && pnpm run electron:build && electron-builder",
+    "release:clean": "rm -rf dist release",
+    "preview": "vite preview --host 127.0.0.1 --port 1420",
+    "typecheck": "pnpm run typecheck:web && pnpm run typecheck:electron",
+    "typecheck:web": "tsc -p tsconfig.json --noEmit",
+    "typecheck:electron": "tsc -p electron/tsconfig.json --noEmit && tsc -p electron/tsconfig.preload.json --noEmit",
+    "icons:generate": "node scripts/generate-icons.cjs"
+  },
+  "dependencies": {
+    "@noble/ed25519": "^3.0.0",
+    "@noble/hashes": "^2.0.1",
+    "date-fns": "^2.30.0",
+    "lucide-react": "^0.294.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/react": "^18.2.43",
+    "@types/react-dom": "^18.2.17",
+    "@vitejs/plugin-react": "^4.2.1",
+    "concurrently": "^8.2.2",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
+    "kill-port": "^2.0.1",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.8",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.locione.desk",
+    "productName": "LociOne Desk",
+    "files": [
+      "dist/**/*",
+      "electron-dist/**/*",
+      "build/**/*",
+      "package.json"
+    ],
+    "extraFiles": [],
+    "extraResources": [
+      "build/**"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "asarUnpack": [],
+    "mac": {
+      "category": "public.app-category.finance",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["universal"]
+        },
+        {
+          "target": "zip",
+          "arch": ["universal"]
+        }
+      ],
+      "icon": "build/icon.icns"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "build/icon.png"
+    }
+  }
+}

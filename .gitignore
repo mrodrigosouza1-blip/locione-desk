@@ -1,0 +1,11 @@
+node_modules/
+dist/
+out/
+release/
+.vite/
+.cache/
+*.log
+src-tauri/target/
+src-tauri/.tauri/
+.DS_Store
+src-tauri/target/
