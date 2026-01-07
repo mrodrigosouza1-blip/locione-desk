@@ -9,3 +9,5 @@ src-tauri/target/
 src-tauri/.tauri/
 .DS_Store
 src-tauri/target/
+.env
+package-lock.json
