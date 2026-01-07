@@ -35,7 +35,9 @@ jobs:
         run: pnpm -s typecheck
 
       - name: Build
-        run: pnpm -s build
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: pnpm -s build -- --publish=never
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
