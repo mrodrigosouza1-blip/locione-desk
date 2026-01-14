@@ -167,7 +167,6 @@ export default function SettingsPage() {
             settings={settings}
             onUpdate={handleUpdate}
             onToast={showToast}
-            onReload={loadSettings}
           />
           
           {/* Seção de Licença */}

@@ -3,7 +3,7 @@
  */
 
 import * as ed25519 from "@noble/ed25519";
-import { b64urlToBytes, b64ToBytes, bytesToB64url } from "./base64url";
+import { b64urlToBytes, b64ToBytes } from "./base64url";
 import { canonicalize } from "./canonicalize";
 import { ensureEd25519 } from "./ed25519Setup";
 import { DEFAULT_PUBLIC_KEY_ED25519_SPKI_DER_BASE64 } from "./licensePublicKey";
