@@ -90,8 +90,9 @@ export default function Layout({ safeMode = false }: LayoutProps) {
     try {
       await settingsRepository.resetSettings();
       deactivateSafeMode();
-      toast.success(t(SK.messages.resetCompleted));
-      window.location.reload();
+      toast.success(t(SK.messages.resetCompleted) + " Recarregue a página para aplicar as mudanças.");
+      // NÃO recarregar automaticamente - usuário deve clicar no botão
+      // window.location.reload();
     } catch (error) {
       toast.error(t(SK.messages.resetError));
     }
@@ -123,10 +124,11 @@ export default function Layout({ safeMode = false }: LayoutProps) {
       deactivateSafeMode();
       setRestorePreviewOpen(false);
       setRestorePreview(null);
-      toast.success(t(SK.messages.backupRestored));
-      setTimeout(() => {
-        window.location.reload();
-      }, 1000);
+      toast.success(t(SK.messages.backupRestored) + " Recarregue a página para aplicar as mudanças.");
+      // NÃO recarregar automaticamente - usuário deve clicar no botão
+      // setTimeout(() => {
+      //   window.location.reload();
+      // }, 1000);
     } catch (error) {
       toast.error(t(SK.messages.backupRestoreError));
     }

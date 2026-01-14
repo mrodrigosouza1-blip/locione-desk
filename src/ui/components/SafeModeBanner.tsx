@@ -22,8 +22,9 @@ export default function SafeModeBanner({
   function handleDeactivate() {
     try {
       deactivateSafeMode();
-      toast.success(t(AK.common.safeModeDeactivated));
-      window.location.reload();
+      toast.success(t(AK.common.safeModeDeactivated) + " Recarregue a página para aplicar as mudanças.");
+      // NÃO recarregar automaticamente - usuário deve clicar no botão
+      // window.location.reload();
     } catch (error) {
       logger.errorTag("SafeModeBanner", "Erro ao desativar safe mode:", error);
       toast.error(t(AK.common.error));

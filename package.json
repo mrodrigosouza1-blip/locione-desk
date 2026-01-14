@@ -5,17 +5,18 @@
   "main": "electron-dist/main.js",
   "type": "module",
   "scripts": {
-    "dev:web": "vite --host 127.0.0.1 --port 1420 --strictPort",
-    "dev:web:free": "kill-port 1420; vite --host 127.0.0.1 --port 1420 --strictPort",
-    "dev": "pnpm run dev:electron",
-    "dev:electron": "concurrently -k --names \"WEB,ELECTRON\" -c \"cyan,magenta\" \"pnpm run dev:web:free\" \"pnpm run wait:web && pnpm run electron:dev\"",
-    "wait:web": "wait-on -l -t 120000 http-get://127.0.0.1:1420/",
+    "dev:ui": "vite --host 127.0.0.1 --port 1420 --strictPort",
+    "dev:electron": "pnpm electron:build && wait-on -l -t 60000 http-get://127.0.0.1:1420/ && electron electron-dist/main.js",
+    "dev": "concurrently -k --names \"UI,ELECTRON\" -c \"cyan,magenta\" \"pnpm dev:ui\" \"pnpm dev:electron\"",
     "electron:build": "tsc -p electron/tsconfig.json && tsc -p electron/tsconfig.preload.json && node -e \"const fs=require('fs'); if(fs.existsSync('electron-dist/preload.js')) fs.renameSync('electron-dist/preload.js','electron-dist/preload.cjs');\"",
-    "electron:dev": "pnpm run electron:build && electron electron-dist/main.js",
+    "electron:dev": "pnpm electron:build && concurrently -k --names \"VITE,ELECTRON\" -c \"cyan,magenta\" \"pnpm dev:ui\" \"wait-on -l -t 60000 http-get://127.0.0.1:1420/ && electron electron-dist/main.js\"",
     "electron:dev:direct": "electron electron-dist/main.js",
     "build:web": "vite build",
     "prepack": "pnpm icons:generate",
     "build": "pnpm run build:web && pnpm run electron:build && electron-builder",
+    "build:mac": "vite build && pnpm electron:build && electron-builder --mac",
+    "build:mac:local-notarize": "FORCE_NOTARIZE=1 pnpm build:mac",
+    "clean:release": "rm -rf release",
     "release:clean": "rm -rf dist release",
     "preview": "vite preview --host 127.0.0.1 --port 1420",
     "typecheck": "pnpm run typecheck:web && pnpm run typecheck:electron",
@@ -33,6 +34,7 @@
     "react-router-dom": "^6.20.0"
   },
   "devDependencies": {
+    "@electron/notarize": "^3.1.1",
     "@types/node": "^20.10.0",
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
@@ -46,7 +48,7 @@
     "wait-on": "^7.2.0"
   },
   "build": {
-    "appId": "com.locione.desk",
+    "appId": "com.locione.locione-desk",
     "productName": "LociOne Desk",
     "files": [
       "dist/**/*",
@@ -62,19 +64,19 @@
       "output": "release"
     },
     "asarUnpack": [],
+    "afterPack": "electron/clean-macos-detritus.cjs",
     "mac": {
       "category": "public.app-category.finance",
       "target": [
-        {
-          "target": "dmg",
-          "arch": ["universal"]
-        },
-        {
-          "target": "zip",
-          "arch": ["universal"]
-        }
+        "dmg",
+        "zip"
       ],
-      "icon": "build/icon.icns"
+      "icon": "build/icon.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "electron/entitlements.mac.plist",
+      "entitlementsInherit": "electron/entitlements.mac.inherit.plist",
+      "notarize": false
     },
     "win": {
       "target": "nsis",
@@ -83,6 +85,7 @@
     "linux": {
       "target": "AppImage",
       "icon": "build/icon.png"
-    }
+    },
+    "afterSign": "electron/notarize.cjs"
   }
 }

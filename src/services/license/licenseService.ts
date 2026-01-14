@@ -45,9 +45,9 @@ export async function validateAndActivateLicense(token: string): Promise<
     const now = new Date();
     const state: LicenseState = {
       plan: payload.plan,
-      licenseId: payload.licenseId,
-      activatedAtISO: now.toISOString(),
-      expiresAtISO: payload.exp ? new Date(payload.exp * 1000).toISOString() : null,
+      licenseId: payload.license_id,
+      activatedAtISO: payload.issued_at || now.toISOString(),
+      expiresAtISO: payload.expires_at || null,
     };
 
     // Salvar no settings
@@ -58,7 +58,7 @@ export async function validateAndActivateLicense(token: string): Promise<
     };
     settingsRepository.updateSettings(updatedSettings as any);
 
-    logger.infoTag("LicenseService", `Licença ${payload.plan} ativada: ${payload.licenseId}`);
+    logger.infoTag("LicenseService", `Licença ${payload.plan} ativada: ${payload.license_id || "N/A"}`);
 
     return { ok: true, state };
   } catch (error) {

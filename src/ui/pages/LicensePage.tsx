@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { useI18n } from "../../i18n/I18nProvider";
-import { verifyLocioneToken } from "../../services/license";
-import { setLicenseToken, clearLicenseToken, getStoredLicense } from "../../services/licenseStorage";
+import { validateLicenseToken } from "../../services/license/licenseValidator";
+import { getStoredLicense } from "../../services/licenseStorage";
 import { getLicenseStatus } from "../../services/license";
-import { getPlan, isRevoked, getRevocationInfo } from "../../services/licenseGate";
+import { isRevoked, getRevocationInfo } from "../../services/licenseGate";
+import { useLicenseStore } from "../../services/licenseStore";
 import { updateCrlCacheIfOnline } from "../../services/crl";
 import { loadCrl } from "../../services/crlStorage";
 import {
@@ -30,6 +31,7 @@ import { logger } from "../../utils/logger";
 export default function LicensePage() {
   const { t } = useI18n();
   const toast = useToast();
+  const licenseStore = useLicenseStore();
   const [tokenInput, setTokenInput] = useState("");
   const [isActivating, setIsActivating] = useState(false);
   const [isRefreshingCrl, setIsRefreshingCrl] = useState(false);
@@ -204,22 +206,40 @@ export default function LicensePage() {
 
     setIsActivating(true);
     try {
-      const result = await verifyLocioneToken(tokenInput.trim());
+      // Verificar se pode verificar (Electron)
+      const canVerify = typeof window !== "undefined" && !!window.locioneCrypto?.verifyToken;
+      if (!canVerify) {
+        toast.error("Ambiente não suportado nesta versão (web). Abra o app Desktop (Electron) para ativar a licença.");
+        setIsActivating(false);
+        return;
+      }
+
+      const result = await validateLicenseToken(tokenInput.trim());
       
       if (result.ok && result.payload) {
-        await setLicenseToken(tokenInput.trim(), result.payload);
+        // Converter payload do validator para o formato do store
+        // O validator retorna plan lowercase ("annual" | "lifetime")
+        // O store espera plan uppercase ("ANNUAL" | "LIFETIME")
+        const planUpper = result.payload.plan.toUpperCase() as "ANNUAL" | "LIFETIME";
+        const payloadForStore = {
+          ...result.payload,
+          plan: planUpper,
+          license_id: result.payload.license_id || "",
+          device_limit: result.payload.max_devices,
+        };
+        
+        // Usar o store para atualizar estado global
+        await licenseStore.setLicense(tokenInput.trim(), payloadForStore);
+        console.log("[license] activated", planUpper);
         toast.success(t(LK.activated));
         setTokenInput("");
-        loadLicense();
-        // Recarregar após um delay para refletir mudanças
-        setTimeout(() => {
-          window.location.reload();
-        }, 1000);
+        loadLicense(); // Recarregar UI local
       } else {
-        toast.error(result.reason || t(LK.invalidToken));
+        toast.error("reason" in result ? result.reason : t(LK.invalidToken));
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("[LicensePage] Erro ao ativar token:", error);
       toast.error(t(LK.errorActivating) + ": " + errorMessage);
     } finally {
       setIsActivating(false);
@@ -228,13 +248,12 @@ export default function LicensePage() {
 
   async function handleClearLicense() {
     try {
-      await clearLicenseToken();
+      // Usar o store para limpar estado global
+      await licenseStore.clearLicense();
       toast.success(t(LK.deactivated));
-      loadLicense();
-      setTimeout(() => {
-        window.location.reload();
-      }, 1000);
+      loadLicense(); // Recarregar UI local
     } catch (error) {
+      console.error("[LicensePage] Erro ao limpar licença:", error);
       toast.error(t(LK.errorDeactivating));
     }
   }
@@ -267,14 +286,8 @@ export default function LicensePage() {
     }
   }
 
-  // Safe getters com fallbacks
-  const plan = (() => {
-    try {
-      return getPlan() || "FREE";
-    } catch {
-      return "FREE";
-    }
-  })();
+  // Usar plan do store (estado reativo)
+  const plan = licenseStore.plan;
   
   
   const status = (() => {

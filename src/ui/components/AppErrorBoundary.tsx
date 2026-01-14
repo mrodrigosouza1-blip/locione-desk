@@ -2,6 +2,8 @@ import { Component, ReactNode } from "react";
 import { logger } from "../../utils/logger";
 import { getI18n } from "../../i18n/I18nProvider";
 import { AK } from "../../i18n/keys/appKeys";
+import { Copy, RotateCw, ArrowLeft } from "lucide-react";
+import { useToast } from "../hooks/useToast";
 
 interface AppErrorBoundaryProps {
   children: ReactNode;
@@ -11,6 +13,26 @@ interface AppErrorBoundaryState {
   hasError: boolean;
   error: Error | null;
   errorInfo: any;
+}
+
+// Helper para copiar texto para clipboard
+function copyToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text);
+  }
+  // Fallback para navegadores antigos
+  const textArea = document.createElement("textarea");
+  textArea.value = text;
+  textArea.style.position = "fixed";
+  textArea.style.opacity = "0";
+  document.body.appendChild(textArea);
+  textArea.select();
+  try {
+    document.execCommand("copy");
+    return Promise.resolve();
+  } finally {
+    document.body.removeChild(textArea);
+  }
 }
 
 /**
@@ -32,86 +54,17 @@ export default class AppErrorBoundary extends Component<AppErrorBoundaryProps, A
     this.setState({ errorInfo });
   }
 
-  handleReload = () => {
-    window.location.reload();
-  };
-
   render() {
     if (this.state.hasError) {
       // Verificar se está em modo dev (sem usar import.meta.env que pode não estar disponível)
       const isDev = process.env.NODE_ENV !== "production" || window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
       
       return (
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            height: "100%",
-            padding: "2rem",
-            textAlign: "center",
-            background: "var(--bg-primary)",
-            color: "var(--text-primary)",
-          }}
-        >
-          {(() => {
-            const { t } = getI18n();
-            return (
-              <>
-                <h1 style={{ fontSize: "1.5rem", fontWeight: 600, marginBottom: "1rem" }}>
-                  {t(AK.errorBoundary.title)}
-                </h1>
-                <p style={{ marginBottom: "2rem", color: "var(--text-secondary)" }}>
-                  {t(AK.errorBoundary.message)}
-                </p>
-                
-                {isDev && this.state.error && (
-                  <details
-                    style={{
-                      marginBottom: "2rem",
-                      padding: "1rem",
-                      background: "var(--bg-secondary)",
-                      borderRadius: "8px",
-                      maxWidth: "800px",
-                      width: "100%",
-                      textAlign: "left",
-                      fontSize: "0.875rem",
-                      maxHeight: "400px",
-                      overflow: "auto",
-                    }}
-                  >
-                    <summary style={{ cursor: "pointer", marginBottom: "0.5rem", fontWeight: 600 }}>
-                      {t(AK.errorBoundary.details)}
-                    </summary>
-                    <pre
-                      style={{
-                        whiteSpace: "pre-wrap",
-                        wordBreak: "break-word",
-                        margin: 0,
-                        fontSize: "0.75rem",
-                        fontFamily: "monospace",
-                      }}
-                    >
-                      {this.state.error.message}
-                      {this.state.error.stack && `\n\n${this.state.error.stack}`}
-                      {this.state.errorInfo?.componentStack && `\n\nComponent Stack:\n${this.state.errorInfo.componentStack}`}
-                    </pre>
-                  </details>
-                )}
-                
-                <div style={{ display: "flex", gap: "0.5rem" }}>
-                  <button className="btn btn-secondary" onClick={() => window.history.back()}>
-                    {t(AK.common.back)}
-                  </button>
-                  <button className="btn btn-primary" onClick={this.handleReload}>
-                    {t(AK.errorBoundary.reload)}
-                  </button>
-                </div>
-              </>
-            );
-          })()}
-        </div>
+        <AppErrorBoundaryUI
+          error={this.state.error}
+          errorInfo={this.state.errorInfo}
+          isDev={isDev}
+        />
       );
     }
 
@@ -119,3 +72,114 @@ export default class AppErrorBoundary extends Component<AppErrorBoundaryProps, A
   }
 }
 
+// Componente funcional para UI do erro (permite usar hooks)
+function AppErrorBoundaryUI({
+  error,
+  errorInfo,
+  isDev,
+}: {
+  error: Error | null;
+  errorInfo: any;
+  isDev: boolean;
+}) {
+  const { t } = getI18n();
+  const toast = useToast();
+
+  const handleCopy = async () => {
+    if (!error) return;
+    
+    const errorText = `${error.message}${error.stack ? `\n\n${error.stack}` : ""}${errorInfo?.componentStack ? `\n\nComponent Stack:\n${errorInfo.componentStack}` : ""}`;
+    
+    try {
+      await copyToClipboard(errorText);
+      toast.success("Detalhes copiados para a área de transferência");
+    } catch (err) {
+      logger.errorTag("AppErrorBoundary", "Erro ao copiar detalhes:", err);
+      toast.error("Erro ao copiar detalhes");
+    }
+  };
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        height: "100%",
+        padding: "2rem",
+        textAlign: "center",
+        background: "var(--bg-primary)",
+        color: "var(--text-primary)",
+      }}
+    >
+      <h1 style={{ fontSize: "1.5rem", fontWeight: 600, marginBottom: "1rem" }}>
+        Ocorreu um erro
+      </h1>
+      <p style={{ marginBottom: "2rem", color: "var(--text-secondary)" }}>
+        {t(AK.errorBoundary.message) || "Algo deu errado. Por favor, tente recarregar a página."}
+      </p>
+      
+      {(isDev || error) && error && (
+        <details
+          style={{
+            marginBottom: "2rem",
+            padding: "1rem",
+            background: "var(--bg-secondary)",
+            borderRadius: "8px",
+            maxWidth: "800px",
+            width: "100%",
+            textAlign: "left",
+            fontSize: "0.875rem",
+            maxHeight: "400px",
+            overflow: "auto",
+          }}
+        >
+          <summary style={{ cursor: "pointer", marginBottom: "0.5rem", fontWeight: 600 }}>
+            {t(AK.errorBoundary.details) || "Detalhes do erro"}
+          </summary>
+          <pre
+            style={{
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              margin: 0,
+              fontSize: "0.75rem",
+              fontFamily: "monospace",
+            }}
+          >
+            {error.message}
+            {error.stack && `\n\n${error.stack}`}
+            {errorInfo?.componentStack && `\n\nComponent Stack:\n${errorInfo.componentStack}`}
+          </pre>
+        </details>
+      )}
+      
+      <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", justifyContent: "center" }}>
+        <button
+          className="btn btn-secondary"
+          onClick={() => window.history.back()}
+          style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+        >
+          <ArrowLeft size={16} />
+          {t(AK.common.back) || "Voltar"}
+        </button>
+        <button
+          className="btn btn-secondary"
+          onClick={handleCopy}
+          style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+        >
+          <Copy size={16} />
+          Copiar detalhes
+        </button>
+        <button
+          className="btn btn-primary"
+          onClick={() => window.location.reload()}
+          style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+        >
+          <RotateCw size={16} />
+          {t(AK.errorBoundary.reload) || "Recarregar"}
+        </button>
+      </div>
+    </div>
+  );
+}

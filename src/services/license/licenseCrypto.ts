@@ -3,7 +3,7 @@
  * Compatível com renderer (não usa require/node:crypto)
  */
 
-import { DEFAULT_PUBLIC_KEY_ED25519_SPKI_DER_BASE64 } from "../licensePublicKey";
+import { SITE_PUBLIC_KEY_ED25519 } from "../licensePublicKey";
 
 /**
  * Converte string base64 para ArrayBuffer
@@ -94,7 +94,7 @@ export async function getPublicKey(): Promise<CryptoKey> {
   if (!cachedPublicKey) {
     // Chave pública com override por env (apenas para DEV)
     const envKey = (import.meta as any).env?.VITE_PUBLIC_KEY_ED25519;
-    const publicKeyBase64 = (envKey && String(envKey).trim()) || DEFAULT_PUBLIC_KEY_ED25519_SPKI_DER_BASE64;
+    const publicKeyBase64 = (envKey && String(envKey).trim()) || SITE_PUBLIC_KEY_ED25519;
     cachedPublicKey = await importEd25519PublicKeySpkiBase64(publicKeyBase64);
   }
   return cachedPublicKey;

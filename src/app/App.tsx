@@ -7,9 +7,9 @@ import AppGate from "../ui/components/AppGate";
 import { I18nProvider } from "../i18n/I18nProvider";
 import { ToastProvider } from "../ui/components/ToastProvider";
 import ErrorBoundary from "../ui/components/ErrorBoundary";
+import { LicenseStoreProvider } from "../services/licenseStore";
 import { logger } from "../utils/logger";
 import { incrementBootFailCount, resetBootFailCount, isSafeModeActive } from "../utils/bootSafety";
-import { verifyLicenseOnStartup, updateCrlOnStartup } from "../services/licenseBootstrap";
 import Dashboard from "../ui/pages/Dashboard";
 import AccountsPage from "../ui/pages/AccountsPage";
 import AccountDetailPage from "../ui/pages/AccountDetailPage";
@@ -47,13 +47,13 @@ function App() {
         setTheme(settings.theme);
         applyTheme(settings.theme);
         
-        // Verificar licença armazenada na inicialização
-        await verifyLicenseOnStartup();
+        // Verificar licença armazenada na inicialização - DESABILITADO TEMPORARIAMENTE
+        // await verifyLicenseOnStartup();
         
-        // Atualizar CRL no startup (fire-and-forget, não bloqueia)
-        updateCrlOnStartup().catch(() => {
-          // Erro silencioso - não bloquear app
-        });
+        // Atualizar CRL no startup (fire-and-forget, não bloqueia) - DESABILITADO TEMPORARIAMENTE
+        // updateCrlOnStartup().catch(() => {
+        //   // Erro silencioso - não bloquear app
+        // });
         
         // Se chegou aqui, boot foi bem-sucedido - resetar contador
         resetBootFailCount();
@@ -126,17 +126,29 @@ function App() {
     <ErrorBoundary>
       <I18nProvider>
         <ToastProvider>
-          <AppGate safeMode={safeMode}>
+          <LicenseStoreProvider>
+            <AppGate safeMode={safeMode}>
             {useHash ? (
-              <HashRouter>
+              <HashRouter
+                future={{
+                  v7_startTransition: true,
+                  v7_relativeSplatPath: true,
+                }}
+              >
                 <RoutesContent />
               </HashRouter>
             ) : (
-              <BrowserRouter>
+              <BrowserRouter
+                future={{
+                  v7_startTransition: true,
+                  v7_relativeSplatPath: true,
+                }}
+              >
                 <RoutesContent />
               </BrowserRouter>
             )}
-          </AppGate>
+            </AppGate>
+          </LicenseStoreProvider>
         </ToastProvider>
       </I18nProvider>
     </ErrorBoundary>

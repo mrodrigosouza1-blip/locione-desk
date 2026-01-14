@@ -196,11 +196,9 @@ export async function verifyLocioneToken(
     const isValid = await ed25519.verify(signatureBytes, messageBytes, publicKeyBytes);
 
     if (!isValid) {
-      // Incluir fingerprint da chave pública para facilitar debug
-      const publicKeyFingerprint = bytesToB64url(publicKeyBytes.slice(0, 6));
       return {
         ok: false,
-        reason: `Assinatura inválida. Token pode ter sido alterado ou é de origem desconhecida. (publicKeyFingerprint: ${publicKeyFingerprint})`,
+        reason: "Assinatura inválida",
       };
     }
 

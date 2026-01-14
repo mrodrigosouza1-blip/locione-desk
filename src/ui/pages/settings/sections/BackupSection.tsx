@@ -134,12 +134,12 @@ export default function BackupSection({
       setLoading(true);
       await restoreBackup(restorePreview);
       setRestorePreview(null);
-      showToast(t(SK.messages.backupRestored));
+      showToast(t(SK.messages.backupRestored) + " Recarregue a página para aplicar as mudanças.", "success");
 
-      // Recarregar página após 1 segundo
-      setTimeout(() => {
-        window.location.reload();
-      }, 1000);
+      // NÃO recarregar automaticamente - usuário deve clicar no botão
+      // setTimeout(() => {
+      //   window.location.reload();
+      // }, 1000);
     } catch (error) {
       logger.errorTag("BackupSection", "Erro ao restaurar backup:", error);
       showToast(t(SK.messages.backupRestoreError), "error");

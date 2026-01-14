@@ -101,6 +101,8 @@ async function createWindow() {
             iconPath = getIconPath(fallbackPath);
         }
     }
+    const preloadPath = path.join(__dirname, "preload.cjs");
+    logger.debugTag("ELECTRON", "Preload path:", preloadPath);
     const mainWindow = new BrowserWindow({
         width: 1200,
         height: 800,
@@ -108,8 +110,8 @@ async function createWindow() {
         webPreferences: {
             contextIsolation: true,
             nodeIntegration: false,
-            sandbox: true,
-            preload: path.join(__dirname, "preload.cjs"),
+            sandbox: false, // Necessário para acesso ao node:crypto no preload
+            preload: preloadPath,
         },
     });
     // Eventos de janela para lock on minimize
@@ -165,26 +167,37 @@ async function createWindow() {
     }
     if (isDev) {
         let retryCount = 0;
-        function loadDevURL() {
+        let loadedSuccessfully = false;
+        let failLoadHandler = null;
+        function loadDevURLWithRetry() {
+            // Nunca chamar loadURL se já carregou com sucesso
+            if (loadedSuccessfully) {
+                logger.debugTag("ELECTRON", "Already loaded successfully, skipping loadURL");
+                return;
+            }
             logger.debugTag("ELECTRON", "Loading URL:", DEV_URL);
             mainWindow.loadURL(DEV_URL).catch((error) => {
                 logger.errorTag("ELECTRON", "Failed to load URL:", error);
             });
         }
-        // Listener para falhas de carregamento
-        mainWindow.webContents.on("did-fail-load", (event, errorCode, errorDescription, validatedURL) => {
+        // Listener para falhas de carregamento (só ativo até sucesso)
+        failLoadHandler = (event, errorCode, errorDescription, validatedURL) => {
+            // Se já carregou com sucesso, não fazer nada
+            if (loadedSuccessfully) {
+                return;
+            }
             logger.errorTag("ELECTRON", "Load failed:", {
                 code: errorCode,
                 description: errorDescription,
                 url: validatedURL,
                 retryCount,
             });
-            // Retry automático apenas em DEV e se não excedeu o limite
+            // Retry automático apenas se não excedeu o limite
             if (retryCount < MAX_RETRY_ATTEMPTS) {
                 retryCount++;
                 logger.debugTag("ELECTRON", `Retrying in ${RETRY_DELAY_MS}ms (attempt ${retryCount}/${MAX_RETRY_ATTEMPTS})...`);
                 setTimeout(() => {
-                    loadDevURL();
+                    loadDevURLWithRetry();
                 }, RETRY_DELAY_MS);
             }
             else {
@@ -195,11 +208,18 @@ async function createWindow() {
                     errorDescription,
                 });
             }
-        });
+        };
+        mainWindow.webContents.on("did-fail-load", failLoadHandler);
         // Listener para quando a página carregar com sucesso
         mainWindow.webContents.on("did-finish-load", () => {
             logger.debugTag("ELECTRON", "Page loaded successfully");
-            retryCount = 0; // Reset retry count on success
+            loadedSuccessfully = true;
+            retryCount = 0;
+            // Remover listener de fail-load após sucesso para evitar loops
+            if (failLoadHandler) {
+                mainWindow.webContents.removeListener("did-fail-load", failLoadHandler);
+                failLoadHandler = null;
+            }
         });
         // Listener para processos de renderização que falharam
         mainWindow.webContents.on("render-process-gone", (event, details) => {
@@ -209,8 +229,8 @@ async function createWindow() {
         mainWindow.on("unresponsive", () => {
             logger.warnTag("ELECTRON", "Window became unresponsive");
         });
-        // Carregar URL inicial
-        loadDevURL();
+        // Carregar URL inicial (wait-on garante que Vite está pronto)
+        loadDevURLWithRetry();
         mainWindow.webContents.openDevTools();
     }
     else {

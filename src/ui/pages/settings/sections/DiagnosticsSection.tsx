@@ -70,11 +70,12 @@ export default function DiagnosticsSection({
     setResetting(true);
     try {
       await settingsRepository.resetSettings();
-      showToast(t(SK.messages.resetCompleted));
+      showToast(t(SK.messages.resetCompleted) + " Recarregue a página para aplicar as mudanças.");
       setIsResetConfirmOpen(false);
-      if (onReload) {
-        setTimeout(() => onReload(), 500);
-      }
+      // NÃO recarregar automaticamente - usuário deve clicar no botão
+      // if (onReload) {
+      //   setTimeout(() => onReload(), 500);
+      // }
     } catch (error) {
       logger.errorTag("DiagnosticsSection", "Erro ao resetar configurações:", error);
       showToast(t(SK.messages.resetError), "error");
@@ -87,12 +88,12 @@ export default function DiagnosticsSection({
     setResettingDatabase(true);
     try {
       await resetDatabase();
-      toast.success(t("about.license.resetDatabase.success") || "Banco resetado com sucesso");
+      toast.success((t("about.license.resetDatabase.success") || "Banco resetado com sucesso") + " Recarregue a página para aplicar as mudanças.");
       setIsResetDatabaseOpen(false);
-      // Recarregar página após 1 segundo
-      setTimeout(() => {
-        window.location.reload();
-      }, 1000);
+      // NÃO recarregar automaticamente - usuário deve clicar no botão
+      // setTimeout(() => {
+      //   window.location.reload();
+      // }, 1000);
     } catch (error) {
       logger.errorTag("DiagnosticsSection", "Erro ao resetar banco de dados:", error);
       toast.error(t("about.license.resetDatabase.error") || "Erro ao resetar banco de dados");

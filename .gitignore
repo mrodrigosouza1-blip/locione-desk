@@ -11,3 +11,4 @@ src-tauri/.tauri/
 src-tauri/target/
 .env
 package-lock.json
+.apple-notary.env

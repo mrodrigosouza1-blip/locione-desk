@@ -11,10 +11,18 @@ interface LociOneAPI {
   getAppVersion(): Promise<string>;
 }
 
+interface LocioneCryptoAPI {
+  verifyToken(
+    token: string,
+    publicKeySpkiB64: string
+  ): { ok: boolean; payloadJson?: string; error?: string };
+}
+
 declare global {
   interface Window {
     electronAPI: ElectronAPI;
     LociOne?: LociOneAPI;
+    locioneCrypto?: LocioneCryptoAPI;
   }
 }
 

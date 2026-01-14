@@ -1,14 +1,22 @@
 /**
  * Validador de tokens de licença Ed25519
+ * Formato: LOCIONE1.<payload_base64url>.<signature_base64url>
+ * A assinatura é feita sobre os bytes do JSON do payload (não base64url, não "LOCIONE1...")
+ * 
+ * Usa Node.js crypto via preload (window.locioneCrypto) pois WebCrypto não suporta Ed25519 no Electron
  */
 
-import { getPublicKey, b64urlToUint8, utf8, verifyEd25519 } from "./licenseCrypto";
+import { SITE_PUBLIC_KEY_ED25519 } from "../licensePublicKey";
 
 export interface LicensePayload {
-  licenseId: string;
+  product: string;
   plan: "annual" | "lifetime";
-  iat: number; // issued at (timestamp)
-  exp?: number; // expiration (timestamp, opcional)
+  issued_at: string; // ISO 8601 date string
+  expires_at: string | null; // ISO 8601 date string ou null
+  max_devices: number;
+  license_id?: string; // Opcional para compatibilidade
+  email?: string; // Opcional
+  notes?: string; // Opcional
 }
 
 export type ValidationResult =
@@ -24,79 +32,105 @@ export type ValidationResult =
 /**
  * Valida e decodifica um token de licença
  * Formato: LOCIONE1.<payload_base64url>.<signature_base64url>
+ * A assinatura é verificada sobre os bytes do JSON do payload (não base64url, não "LOCIONE1...")
  */
 export async function validateLicenseToken(token: string): Promise<ValidationResult> {
   try {
+    // Verificar se window.locioneCrypto está disponível (Electron)
+    const canVerify = typeof window !== "undefined" && !!window.locioneCrypto?.verifyToken;
+    
+    if (!canVerify) {
+      return {
+        ok: false,
+        reason: "Ambiente não suportado nesta versão (web). Abra o app Desktop (Electron) para ativar a licença.",
+      };
+    }
+
     // 1. Verificar formato básico
     const parts = token.trim().split(".");
     if (parts.length !== 3) {
       return { ok: false, reason: "Formato de token inválido. Esperado: LOCIONE1.<payload>.<signature>" };
     }
 
-    const [prefix, payloadB64url, sigB64url] = parts;
+    const [prefix] = parts;
 
     // 2. Verificar prefixo
     if (prefix !== "LOCIONE1") {
       return { ok: false, reason: "Prefixo inválido. Esperado: LOCIONE1" };
     }
 
-    // 3. Decodificar payload
-    let payload: LicensePayload;
+    // 3. Verificar assinatura usando Node.js crypto via preload
+    const verifyResult = window.locioneCrypto!.verifyToken(token, SITE_PUBLIC_KEY_ED25519);
+
+    if (!verifyResult.ok) {
+      return {
+        ok: false,
+        reason: verifyResult.error || "Assinatura inválida. Token pode ter sido alterado ou é de origem desconhecida.",
+      };
+    }
+
+    // 4. Parse payload JSON
+    let payload: any;
     try {
-      const payloadBytes = b64urlToUint8(payloadB64url);
-      const payloadJson = new TextDecoder().decode(payloadBytes);
-      payload = JSON.parse(payloadJson);
+      if (!verifyResult.payloadJson) {
+        return { ok: false, reason: "Payload inválido" };
+      }
+      payload = JSON.parse(verifyResult.payloadJson);
     } catch (error) {
       return { ok: false, reason: "Payload inválido ou corrompido" };
     }
 
-    // 4. Validar estrutura do payload
-    if (!payload.licenseId || typeof payload.licenseId !== "string") {
-      return { ok: false, reason: "Payload inválido: licenseId ausente ou inválido" };
+    // 5. Validar estrutura do payload
+    if (!payload.product || typeof payload.product !== "string") {
+      return { ok: false, reason: "Payload inválido: product ausente ou inválido" };
     }
 
-    if (payload.plan !== "annual" && payload.plan !== "lifetime") {
+    if (payload.product !== "locione-desk") {
+      return { ok: false, reason: "Produto incompatível. Esperado 'locione-desk'" };
+    }
+
+    // Normalizar plan (aceitar ANNUAL/LIFETIME em maiúsculas)
+    const planNormalized = typeof payload.plan === "string" 
+      ? payload.plan.toLowerCase() 
+      : payload.plan;
+    
+    if (planNormalized !== "annual" && planNormalized !== "lifetime") {
       return { ok: false, reason: "Payload inválido: plan deve ser 'annual' ou 'lifetime'" };
     }
 
-    if (typeof payload.iat !== "number" || payload.iat <= 0) {
-      return { ok: false, reason: "Payload inválido: iat ausente ou inválido" };
+    if (!payload.issued_at || typeof payload.issued_at !== "string") {
+      return { ok: false, reason: "Payload inválido: issued_at ausente ou inválido" };
     }
 
-    // 5. Validar expiração conforme o plano
-    const now = Math.floor(Date.now() / 1000); // timestamp em segundos
+    if (typeof payload.max_devices !== "number" || payload.max_devices < 1) {
+      return { ok: false, reason: "Payload inválido: max_devices deve ser >= 1" };
+    }
 
-    if (payload.plan === "annual") {
-      if (!payload.exp || typeof payload.exp !== "number") {
-        return { ok: false, reason: "Plano anual requer campo 'exp' (expiração)" };
+    // 6. Validar expiração
+    const now = new Date();
+    if (payload.expires_at !== null && payload.expires_at !== undefined) {
+      if (typeof payload.expires_at !== "string") {
+        return { ok: false, reason: "Payload inválido: expires_at deve ser string ou null" };
       }
-      if (payload.exp <= now) {
-        return { ok: false, reason: "Licença anual expirada" };
+      const expiresAt = new Date(payload.expires_at);
+      if (Number.isNaN(expiresAt.getTime())) {
+        return { ok: false, reason: "Payload inválido: expires_at data inválida" };
       }
-    } else if (payload.plan === "lifetime") {
-      // Lifetime não deve ter exp
-      if (payload.exp !== undefined) {
-        return { ok: false, reason: "Plano vitalício não deve ter campo 'exp'" };
+      if (expiresAt <= now) {
+        return { ok: false, reason: "Licença expirada" };
       }
     }
 
-    // 6. Verificar assinatura
-    // A assinatura é feita sobre: "LOCIONE1." + payload_base64url (UTF-8)
-    const messageToVerify = `${prefix}.${payloadB64url}`;
-    const messageBytes = utf8(messageToVerify);
-    const signatureBytes = b64urlToUint8(sigB64url);
+    // 7. Normalizar plan no payload retornado
+    const normalizedPayload: LicensePayload = {
+      ...payload,
+      plan: planNormalized as "annual" | "lifetime",
+    };
 
-    const publicKey = await getPublicKey();
-    const isValid = await verifyEd25519(publicKey, messageBytes, signatureBytes);
-
-    if (!isValid) {
-      return { ok: false, reason: "Assinatura inválida. Token pode ter sido alterado ou é de origem desconhecida." };
-    }
-
-    return { ok: true, payload };
+    return { ok: true, payload: normalizedPayload };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error("[LicenseValidator] Erro ao validar token:", errorMessage);
     return { ok: false, reason: `Erro ao validar token: ${errorMessage}` };
   }
 }
-
