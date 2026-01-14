@@ -117,7 +117,7 @@ function ErrorBoundaryUI({
       <p style={{ marginBottom: "2rem", color: "var(--text-secondary)" }}>
         {t(AK.errorBoundary.message) || "Algo deu errado. Por favor, tente recarregar a página."}
       </p>
-      {error && (
+      {error && isDev && (
         <details
           style={{
             marginBottom: "2rem",

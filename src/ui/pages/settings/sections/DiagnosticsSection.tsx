@@ -17,12 +17,10 @@ interface DiagnosticsSectionProps {
   settings: Settings;
   onUpdate?: (partial: Partial<Settings>) => Promise<void>;
   onToast?: (message: string, type: "success" | "error") => void;
-  onReload?: () => void;
 }
 
 export default function DiagnosticsSection({
   onToast,
-  onReload,
 }: DiagnosticsSectionProps) {
   const [isLogsOpen, setIsLogsOpen] = useState(false);
   const [isRepairConfirmOpen, setIsRepairConfirmOpen] = useState(false);
