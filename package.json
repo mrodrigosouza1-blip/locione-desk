@@ -79,6 +79,9 @@
       "entitlementsInherit": "electron/entitlements.mac.inherit.plist",
       "notarize": false
     },
+    "dmg": {
+      "title": "LociOne Desk"
+    },
     "win": {
       "target": "nsis",
       "icon": "build/icon.ico"
