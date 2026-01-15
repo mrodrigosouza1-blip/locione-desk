@@ -14,7 +14,7 @@
     "build:web": "vite build",
     "prepack": "pnpm icons:generate",
     "build": "pnpm run build:web && pnpm run electron:build && electron-builder",
-    "build:mac": "vite build && pnpm electron:build && electron-builder --mac",
+    "build:mac": "vite build && pnpm electron:build && electron-builder --mac --universal",
     "build:mac:local-notarize": "FORCE_NOTARIZE=1 pnpm build:mac",
     "clean:release": "rm -rf release",
     "release:clean": "rm -rf dist release",
