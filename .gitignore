@@ -20,3 +20,11 @@ release/
 win-unpacked/
 *.exe
 *.blockmap
+release/
+win-unpacked/
+*.exe
+*.blockmap
+release/
+win-unpacked/
+*.exe
+*.blockmap
