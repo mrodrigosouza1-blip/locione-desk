@@ -1,13 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { goalRepository } from "../../infra/repositories/goalRepository";
 import { accountRepository } from "../../infra/repositories/accountRepository";
 import { formatCurrency } from "../../utils/format";
 import { settingsRepository } from "../../infra/repositories/settingsRepository";
-import { parseMoneyInput, formatMoneyInput, cleanMoneyInput } from "../utils/moneyInput";
+import { parseMoneyInput, formatMoneyInput, cleanMoneyInput, getMoneyPlaceholder } from "../utils/moneyInput";
 import Topbar from "../components/Topbar";
 import Modal from "../components/Modal";
 import GoalDetailsModal from "../components/GoalDetailsModal";
-import { Plus, Target, Edit, Trash2 } from "lucide-react";
+import { Plus, Target, Trash2, Trophy } from "lucide-react";
 import { useI18n } from "../../i18n/I18nProvider";
 import { GK } from "../../i18n/keys/goalsKeys";
 import { AK } from "../../i18n/keys/appKeys";
@@ -18,6 +18,7 @@ import { getUsageCounters } from "../../services/usageCounters";
 import { useNavigate } from "react-router-dom";
 import EmptyState from "../../shared/components/EmptyState";
 import { illustrations } from "../../assets/illustrations";
+import { onAppEvent } from "../state/appEvents";
 
 export default function GoalsPage() {
   const { t } = useI18n();
@@ -31,6 +32,8 @@ export default function GoalsPage() {
   const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false);
   const [selectedGoal, setSelectedGoal] = useState<any>(null);
   const [editingGoal, setEditingGoal] = useState<any | null>(null);
+  const [editingEndDate, setEditingEndDate] = useState<string | null>(null);
+  const [showCompleted, setShowCompleted] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [goalToDelete, setGoalToDelete] = useState<any | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -73,10 +76,121 @@ export default function GoalsPage() {
       return { currency: "BRL", date_format: "DD/MM/YYYY", theme: "light" as const };
     }
   });
+  const [fullSettings] = useState(() => {
+    try {
+      return settingsRepository.getSettings();
+    } catch {
+      return null;
+    }
+  });
+  const locale = fullSettings?.preferences.locale ?? "pt-BR";
+
+  const defaultStartDate = useMemo(() => new Date().toISOString().split("T")[0], []);
+
+  function hashString(input: string) {
+    let hash = 0;
+    for (let i = 0; i < input.length; i += 1) {
+      hash = (hash << 5) - hash + input.charCodeAt(i);
+      hash |= 0;
+    }
+    return Math.abs(hash);
+  }
+
+  function pickVariant(keys: string[], seed: string) {
+    if (keys.length === 1) return keys[0];
+    const idx = hashString(seed) % keys.length;
+    return keys[idx];
+  }
+
+  function getGoalMotivation(goal: any, percentage: number, deposited: number) {
+    const seedBase = `${goal.id}-${Math.floor(percentage / 10)}`;
+    if (!goal.target_value_cents || goal.target_value_cents <= 0) {
+      return t(pickVariant([GK.motivation.noTarget, GK.motivation.noTargetAlt], `${seedBase}-no-target`));
+    }
+    if (!deposited || deposited <= 0) {
+      return t(pickVariant([GK.motivation.firstDeposit, GK.motivation.firstDepositAlt], `${seedBase}-first`));
+    }
+    if (percentage < 25) {
+      return t(pickVariant([GK.motivation.start, GK.motivation.startAlt], `${seedBase}-start`));
+    }
+    if (percentage < 50) {
+      return t(pickVariant([GK.motivation.mid, GK.motivation.midAlt], `${seedBase}-mid`));
+    }
+    if (percentage < 80) {
+      return t(pickVariant([GK.motivation.strong, GK.motivation.strongAlt], `${seedBase}-strong`));
+    }
+    return t(pickVariant([GK.motivation.finalStretch, GK.motivation.finalStretchAlt], `${seedBase}-final`));
+  }
+
+  const goalsByCurrency = useMemo(() => {
+    const groups = new Map<string, any[]>();
+    goals.forEach((goal) => {
+      const currencyCode = goal.currency_code || settings.currency;
+      if (!groups.has(currencyCode)) {
+        groups.set(currencyCode, []);
+      }
+      groups.get(currencyCode)!.push(goal);
+    });
+    return groups;
+  }, [goals, settings.currency]);
+
+  const goalsByCurrencyEntries = useMemo(() => {
+    return Array.from(goalsByCurrency.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [goalsByCurrency]);
+
+  const isGoalCompleted = (goal: any) =>
+    goal.target_value_cents > 0 && (goal.deposited_amount || 0) >= goal.target_value_cents;
+
+  const activeGoalsByCurrencyEntries = useMemo(() => {
+    return goalsByCurrencyEntries
+      .map(([currencyCode, currencyGoals]) => [
+        currencyCode,
+        currencyGoals.filter((goal) => !isGoalCompleted(goal)),
+      ] as const)
+      .filter(([, currencyGoals]) => currencyGoals.length > 0);
+  }, [goalsByCurrencyEntries]);
+
+  const completedGoalsByCurrencyEntries = useMemo(() => {
+    return goalsByCurrencyEntries
+      .map(([currencyCode, currencyGoals]) => [
+        currencyCode,
+        currencyGoals.filter((goal) => isGoalCompleted(goal)),
+      ] as const)
+      .filter(([, currencyGoals]) => currencyGoals.length > 0);
+  }, [goalsByCurrencyEntries]);
 
   useEffect(() => {
     loadGoals();
     loadAccounts();
+  }, []);
+
+  useEffect(() => {
+    if (formData.type !== "monthly") {
+      return;
+    }
+    const targetCents = formData.target_value_cents;
+    if (targetCents <= 0) {
+      setMonthNumbers([]);
+      setEditingEndDate(null);
+      return;
+    }
+    const { months: nextMonths, endDate } = calculateMonthsForTarget(targetCents);
+    const nextKey = nextMonths.slice().sort((a, b) => a - b).join(",");
+    const currentKey = monthNumbers.slice().sort((a, b) => a - b).join(",");
+    if (nextKey !== currentKey) {
+      setMonthNumbers(nextMonths);
+    }
+    if (endDate !== editingEndDate) {
+      setEditingEndDate(endDate);
+    }
+  }, [formData.type, formData.target_value_cents, dailyValueMode, dayValue, defaultStartDate]);
+
+  useEffect(() => {
+    const unsubscribe = onAppEvent("data:changed", () => {
+      loadGoals();
+      loadAccounts();
+    });
+    return unsubscribe;
   }, []);
 
   async function loadGoals() {
@@ -122,24 +236,122 @@ export default function GoalsPage() {
     }
   }
 
+  function calculateStepsForTarget(targetValueCents: number): number {
+    if (targetValueCents <= 0) return 1;
+    if (stepsValueMode === "fixed_per_step") {
+      const stepValueCents = parseMoneyInput(stepValue);
+      if (stepValueCents <= 0) return stepsCount;
+      return Math.max(1, Math.ceil(targetValueCents / stepValueCents));
+    }
+    const targetUnits = Math.max(1, Math.ceil(targetValueCents / 100));
+    return Math.max(1, Math.ceil((Math.sqrt(1 + 8 * targetUnits) - 1) / 2));
+  }
+
+  function calculateMonthsForTarget(targetValueCents: number): { months: number[]; endDate: string | null } {
+    if (targetValueCents <= 0) return { months: [], endDate: null };
+    const startDate = new Date(`${defaultStartDate}T00:00:00`);
+    const startYear = startDate.getFullYear();
+    const startMonth = startDate.getMonth() + 1;
+    const startDay = startDate.getDate();
+    const monthOrder = Array.from({ length: 12 - startMonth + 1 }, (_, i) => startMonth + i);
+    const valueMode = dailyValueMode;
+    const fixedAmountCents = parseMoneyInput(dayValue);
+
+    let remaining = targetValueCents;
+    const selected: number[] = [];
+    let endDate: string | null = null;
+
+    for (const monthNum of monthOrder) {
+      if (remaining <= 0) break;
+      const daysInCurrent = daysInMonth(startYear, monthNum);
+      const monthStartDay = monthNum === startMonth ? startDay : 1;
+      const remainingDays = Math.max(0, daysInCurrent - monthStartDay + 1);
+      if (remainingDays <= 0) continue;
+
+      let monthContribution = 0;
+      if (valueMode === "fixed_per_day") {
+        if (fixedAmountCents <= 0) return { months: monthNumbers, endDate: null };
+        monthContribution = remainingDays * fixedAmountCents;
+        if (remaining <= monthContribution) {
+          const daysNeeded = Math.max(1, Math.ceil(remaining / fixedAmountCents));
+          const endDay = Math.min(daysInCurrent, monthStartDay + daysNeeded - 1);
+          endDate = `${startYear}-${String(monthNum).padStart(2, "0")}-${String(endDay).padStart(2, "0")}`;
+          selected.push(monthNum);
+          break;
+        }
+      } else {
+        const totalUnits = (remainingDays * (monthStartDay + daysInCurrent)) / 2;
+        monthContribution = Math.round(totalUnits * 100);
+        if (remaining <= monthContribution) {
+          const remainingUnits = Math.max(1, Math.ceil(remaining / 100));
+          const b = (2 * monthStartDay) - 1;
+          const n = Math.max(1, Math.ceil((Math.sqrt((b * b) + (8 * remainingUnits)) - b) / 2));
+          const endDay = Math.min(daysInCurrent, monthStartDay + n - 1);
+          endDate = `${startYear}-${String(monthNum).padStart(2, "0")}-${String(endDay).padStart(2, "0")}`;
+          selected.push(monthNum);
+          break;
+        }
+      }
+      if (monthContribution <= 0) continue;
+      selected.push(monthNum);
+      remaining -= monthContribution;
+    }
+
+    if (!endDate && selected.length > 0) {
+      const lastMonth = selected[selected.length - 1];
+      endDate = `${startYear}-${String(lastMonth).padStart(2, "0")}-${String(daysInMonth(startYear, lastMonth)).padStart(2, "0")}`;
+    }
+    return { months: selected.length > 0 ? selected : monthNumbers, endDate };
+  }
+
   // Calcular valor total para "Por passo" (em centavos)
   const calculateTotalForSteps = (): number => {
     if (formData.type !== "steps") return 0;
-    const stepValueCents = Math.round(parseFloat(stepValue || "0") * 100);
+    const stepValueCents = parseMoneyInput(stepValue);
     return calcStepsTotal(stepsCount, stepsValueMode, stepValueCents);
   };
 
   // Calcular valor total para "Por mês" (em centavos) - soma todos os meses selecionados
   const calculateTotalForMonthly = (): number => {
     if (formData.type !== "monthly" || monthNumbers.length === 0) return 0;
+    if (formData.target_value_cents <= 0) return 0;
     const year = new Date().getFullYear();
-    const dayValueCents = Math.round(parseFloat(dayValue || "0") * 100);
+    const dayValueCents = parseMoneyInput(dayValue);
+    const startDate = new Date(`${defaultStartDate}T00:00:00`);
+    const startMonth = startDate.getMonth() + 1;
+    const startDay = startDate.getDate();
+    const endDate = editingEndDate ? new Date(`${editingEndDate}T00:00:00`) : null;
+    const endMonth = endDate ? endDate.getMonth() + 1 : null;
+    const endDay = endDate ? endDate.getDate() : null;
     
     // Somar o total de cada mês selecionado
     let totalCents = 0;
     for (const monthNum of monthNumbers) {
       const days = daysInMonth(year, monthNum);
+      const isStartMonth = monthNum === startMonth;
+      const isEndMonth = endMonth ? monthNum === endMonth : false;
+      if (!isStartMonth) {
+        if (isEndMonth && endDay) {
+          if (dailyValueMode === "fixed_per_day") {
+            totalCents += endDay * dayValueCents;
+          } else {
+            const totalUnits = (endDay * (endDay + 1)) / 2;
+            totalCents += totalUnits * 100;
+          }
+        } else {
       totalCents += calcMonthlyTotal(days, dailyValueMode, dayValueCents);
+        }
+        continue;
+      }
+      const lastDay = isEndMonth && endDay ? endDay : days;
+      const remainingDays = Math.max(0, lastDay - startDay + 1);
+      if (remainingDays <= 0) continue;
+      if (dailyValueMode === "fixed_per_day") {
+        totalCents += remainingDays * dayValueCents;
+      } else {
+        const totalUnits = (remainingDays * (startDay + lastDay)) / 2;
+        totalCents += totalUnits * 100;
+      }
     }
     
     return totalCents;
@@ -183,7 +395,7 @@ export default function GoalsPage() {
         return;
       }
       if (stepsValueMode === "fixed_per_step") {
-        const stepValueNum = parseFloat(stepValue || "0");
+        const stepValueNum = parseMoneyInput(stepValue) / 100;
         if (stepValueNum <= 0) {
           toast.error(t(GK.messages.stepValueRequired));
           return;
@@ -201,7 +413,7 @@ export default function GoalsPage() {
         return;
       }
       if (dailyValueMode === "fixed_per_day") {
-        const dayValueNum = parseFloat(dayValue || "0");
+        const dayValueNum = parseMoneyInput(dayValue) / 100;
         if (dayValueNum <= 0) {
           toast.error(t(GK.messages.dayValueRequired));
           return;
@@ -221,7 +433,7 @@ export default function GoalsPage() {
     if (formData.type === "steps") {
       targetValueCents = calculateTotalForSteps();
     } else if (formData.type === "monthly") {
-      targetValueCents = calculateTotalForMonthly();
+      targetValueCents = formData.target_value_cents > 0 ? formData.target_value_cents : calculateTotalForMonthly();
     } else if (formData.type === "free") {
       targetValueCents = formData.target_value_cents;
     }
@@ -233,16 +445,20 @@ export default function GoalsPage() {
       config.mode = stepsValueMode === "fixed_per_step" ? "fixed" : "by_number";
       if (stepsValueMode === "fixed_per_step") {
         // Salvar valor por passo em centavos
-        config.fixed_amount_cents = Math.round(parseFloat(stepValue || "0") * 100);
+        config.fixed_amount_cents = parseMoneyInput(stepValue);
       }
     } else if (formData.type === "monthly") {
       const year = new Date().getFullYear();
       config.month_numbers = monthNumbers; // Array de meses
       config.year = year;
       config.daily_value_mode = dailyValueMode;
+      config.start_date = defaultStartDate;
+      if (editingEndDate) {
+        config.end_date = editingEndDate;
+      }
       if (dailyValueMode === "fixed_per_day") {
         // Salvar valor por dia em centavos
-        config.fixed_amount_cents = Math.round(parseFloat(dayValue || "0") * 100);
+        config.fixed_amount_cents = parseMoneyInput(dayValue);
       }
     }
 
@@ -385,17 +601,6 @@ export default function GoalsPage() {
     }
   }
 
-  function handleEditGoal(goal: any) {
-    setEditingGoal(goal);
-    setFormData({
-      name: goal.name,
-      type: goal.type === "target" ? "free" : "free", // Simplificar para edição
-      target_value_cents: goal.target_value_cents || 0,
-    });
-    setCurrency(goal.currency_code || settingsRepository.get().currency || "BRL");
-    setIsModalOpen(true);
-  }
-
   function handleDeleteClick(goal: any) {
     setGoalToDelete(goal);
     setIsDeleteModalOpen(true);
@@ -431,7 +636,7 @@ export default function GoalsPage() {
             if (!requireGate("goals.create", counters, toast, navigate, t)) {
               return;
             }
-            setIsModalOpen(true);
+            navigate("/goals/new");
           },
           icon: <Plus size={16} />,
           variant: "primary",
@@ -461,94 +666,196 @@ export default function GoalsPage() {
             }
           />
         ) : (
-          <div className="grid grid-3">
-            {goals.map((goal) => {
-              const deposited = goal.deposited_amount || 0;
-              const percentage = goal.target_value_cents
-                ? (deposited / goal.target_value_cents) * 100
-                : 0;
+          <>
+            {activeGoalsByCurrencyEntries.length === 0 ? (
+              <div style={{ marginBottom: "1.5rem", color: "var(--text-secondary)" }}>
+                {t(GK.empty.completedOnly)}
+              </div>
+            ) : (
+              activeGoalsByCurrencyEntries.map(([currencyCode, currencyGoals]) => (
+                <div key={currencyCode} style={{ marginBottom: "2rem" }}>
+                  <div style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--text-secondary)", marginBottom: "0.75rem" }}>
+                    {currencyCode}
+                  </div>
+                  <div className="grid grid-3">
+                    {currencyGoals.map((goal) => {
+                      const deposited = goal.deposited_amount || 0;
+                      const percentage = goal.target_value_cents
+                        ? (deposited / goal.target_value_cents) * 100
+                        : 0;
+                      const motivation = getGoalMotivation(goal, percentage, deposited);
 
-              return (
-                <div key={goal.id} className="card">
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
-                    <Target size={24} />
-                    <h3 style={{ fontSize: "1.125rem", fontWeight: 600, flex: 1 }}>{goal.name}</h3>
-                    <div style={{ display: "flex", gap: "0.5rem" }}>
-                      <button
-                        className="btn btn-secondary"
-                        style={{ padding: "0.25rem", minWidth: "auto" }}
-                        onClick={() => handleEditGoal(goal)}
-                        title={t(AK.common.edit)}
-                      >
-                        <Edit size={16} />
-                      </button>
-                      <button
-                        className="btn btn-secondary"
-                        style={{ padding: "0.25rem", minWidth: "auto", color: "var(--error)" }}
-                        onClick={() => handleDeleteClick(goal)}
-                        title={t(AK.common.delete)}
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  </div>
-                  <div style={{ marginBottom: "0.5rem" }}>
-                    <div style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginBottom: "0.25rem" }}>
-                      {t(GK.display.current)}
-                    </div>
-                    <div style={{ fontSize: "1.25rem", fontWeight: 600 }}>
-                      {formatCurrency(deposited, goal.currency_code || settings.currency)}
-                      {goal.target_value_cents && ` / ${formatCurrency(goal.target_value_cents, goal.currency_code || settings.currency)}`}
-                    </div>
-                  </div>
-                  {goal.target_value_cents && (
-                    <div style={{ marginTop: "0.5rem" }}>
-                      <div style={{
-                        height: "8px",
-                        background: "var(--bg-tertiary)",
-                        borderRadius: "4px",
-                        overflow: "hidden"
-                      }}>
-                        <div style={{
-                          height: "100%",
-                          width: `${Math.min(percentage, 100)}%`,
-                          background: "var(--accent-primary)",
-                          transition: "width 0.3s"
-                        }} />
-                      </div>
-                      <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.25rem" }}>
-                        {percentage.toFixed(1)}% {t(GK.display.completed)}
-                      </div>
-                    </div>
-                  )}
-                  <div style={{ display: "flex", gap: "0.5rem", marginTop: "1rem" }}>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      style={{ flex: 1, fontSize: "0.75rem", padding: "0.5rem" }}
-                      onClick={() => {
-                        setSelectedGoalId(goal.id);
-                      }}
-                    >
-                      {t(GK.display.details)}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      style={{ flex: 1, fontSize: "0.75rem", padding: "0.5rem" }}
-                      onClick={() => {
-                        setSelectedGoalId(goal.id);
-                        setSelectedGoal(goal);
-                      }}
-                      disabled={!goal.deposited_amount || goal.deposited_amount <= 0}
-                    >
-                      {t(GK.display.withdraw)}
-                    </button>
+                      return (
+                        <div key={goal.id} className="card">
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
+                            <Target size={24} />
+                            <h3 style={{ fontSize: "1.125rem", fontWeight: 600, flex: 1 }}>{goal.name}</h3>
+                            <div style={{ display: "flex", gap: "0.5rem" }}>
+                              <button
+                                className="btn btn-secondary"
+                                style={{ padding: "0.25rem", minWidth: "auto", color: "var(--error)" }}
+                                onClick={() => handleDeleteClick(goal)}
+                                title={t(AK.common.delete)}
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                          </div>
+                          <div style={{ marginBottom: "0.5rem" }}>
+                            <div style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginBottom: "0.25rem" }}>
+                              {t(GK.display.current)}
+                            </div>
+                            <div style={{ fontSize: "1.25rem", fontWeight: 600 }}>
+                              {formatCurrency(deposited, { currency: goal.currency_code || settings.currency })}
+                              {goal.target_value_cents && ` / ${formatCurrency(goal.target_value_cents, { currency: goal.currency_code || settings.currency })}`}
+                            </div>
+                          </div>
+                          {goal.target_value_cents && (
+                            <div style={{ marginTop: "0.5rem" }}>
+                              <div style={{
+                                height: "8px",
+                                background: "var(--bg-tertiary)",
+                                borderRadius: "4px",
+                                overflow: "hidden"
+                              }}>
+                                <div style={{
+                                  height: "100%",
+                                  width: `${Math.min(percentage, 100)}%`,
+                                  background: "var(--accent-primary)",
+                                  transition: "width 0.3s"
+                                }} />
+                              </div>
+                              <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.25rem" }}>
+                                {percentage.toFixed(1)}% {t(GK.display.completed)}
+                              </div>
+                            </div>
+                          )}
+                          <div style={{ marginTop: "0.5rem", fontSize: "0.75rem", color: "var(--text-secondary)" }}>
+                            {motivation}
+                          </div>
+                          <div style={{ display: "flex", gap: "0.5rem", marginTop: "1rem" }}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              style={{ flex: 1, fontSize: "0.75rem", padding: "0.5rem" }}
+                              onClick={() => {
+                                setSelectedGoalId(goal.id);
+                              }}
+                            >
+                              {t(GK.display.details)}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              style={{ flex: 1, fontSize: "0.75rem", padding: "0.5rem" }}
+                              onClick={() => {
+                                setSelectedGoalId(goal.id);
+                                setSelectedGoal(goal);
+                              }}
+                              disabled={!goal.deposited_amount || goal.deposited_amount <= 0}
+                            >
+                              {t(GK.display.withdraw)}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
-              );
-            })}
-          </div>
+              ))
+            )}
+
+            {completedGoalsByCurrencyEntries.length > 0 && (
+              <div style={{ marginTop: "1rem" }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowCompleted((current) => !current)}
+                >
+                  {showCompleted ? t(GK.completed.hide) : t(GK.completed.show)}
+                </button>
+              </div>
+            )}
+
+            {showCompleted && completedGoalsByCurrencyEntries.map(([currencyCode, currencyGoals]) => (
+              <div key={currencyCode} style={{ marginBottom: "2rem" }}>
+                <div style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--text-secondary)", marginBottom: "0.75rem" }}>
+                  {currencyCode}
+                </div>
+                <div className="grid grid-3">
+                  {currencyGoals.map((goal) => {
+                    const deposited = goal.deposited_amount || 0;
+                    const percentage = goal.target_value_cents
+                      ? (deposited / goal.target_value_cents) * 100
+                      : 0;
+
+                    return (
+                      <div key={goal.id} className="card">
+                        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
+                          <Trophy size={24} />
+                          <h3 style={{ fontSize: "1.125rem", fontWeight: 600, flex: 1 }}>{goal.name}</h3>
+                          <span style={{ fontSize: "0.75rem", color: "var(--success)", fontWeight: 600 }}>
+                            {t(GK.completed.badge)}
+                          </span>
+                          <div style={{ display: "flex", gap: "0.5rem" }}>
+                            <button
+                              className="btn btn-secondary"
+                              style={{ padding: "0.25rem", minWidth: "auto", color: "var(--error)" }}
+                              onClick={() => handleDeleteClick(goal)}
+                              title={t(AK.common.delete)}
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </div>
+                        <div style={{ marginBottom: "0.5rem" }}>
+                          <div style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginBottom: "0.25rem" }}>
+                            {t(GK.display.current)}
+                          </div>
+                          <div style={{ fontSize: "1.25rem", fontWeight: 600 }}>
+                            {formatCurrency(deposited, { currency: goal.currency_code || settings.currency })}
+                            {goal.target_value_cents && ` / ${formatCurrency(goal.target_value_cents, { currency: goal.currency_code || settings.currency })}`}
+                          </div>
+                        </div>
+                        {goal.target_value_cents && (
+                          <div style={{ marginTop: "0.5rem" }}>
+                            <div style={{
+                              height: "8px",
+                              background: "var(--bg-tertiary)",
+                              borderRadius: "4px",
+                              overflow: "hidden"
+                            }}>
+                              <div style={{
+                                height: "100%",
+                                width: `${Math.min(percentage, 100)}%`,
+                                background: "var(--accent-primary)",
+                                transition: "width 0.3s"
+                              }} />
+                            </div>
+                            <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "0.25rem" }}>
+                              {percentage.toFixed(1)}% {t(GK.display.completed)}
+                            </div>
+                          </div>
+                        )}
+                        <div style={{ display: "flex", gap: "0.5rem", marginTop: "1rem" }}>
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ flex: 1, fontSize: "0.75rem", padding: "0.5rem" }}
+                            onClick={() => {
+                              setSelectedGoalId(goal.id);
+                            }}
+                          >
+                            {t(GK.display.details)}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </>
         )}
 
         <Modal 
@@ -612,6 +919,26 @@ export default function GoalsPage() {
                 border: "1px solid var(--border-primary)"
               }}>
                 <h3 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "1rem" }}>{t(GK.steps.title)}</h3>
+
+                <div className="form-group">
+                  <label className="label">{t(GK.fields.targetValue)} ({currency})</label>
+                  <input
+                    className="input"
+                    type="text"
+                    inputMode="decimal"
+                    value={formData.target_value_cents > 0 ? formatMoneyInput(formData.target_value_cents) : ""}
+                    onChange={(e) => {
+                      const cleaned = cleanMoneyInput(e.target.value);
+                      const targetCents = parseMoneyInput(cleaned);
+                      setFormData({ ...formData, target_value_cents: targetCents });
+                      const nextSteps = calculateStepsForTarget(targetCents);
+                      if (nextSteps !== stepsCount) {
+                        setStepsCount(nextSteps);
+                      }
+                    }}
+                    placeholder={getMoneyPlaceholder(currency, locale)}
+                  />
+                </div>
                 
                 <div className="form-group">
                   <label className="label">{t(GK.steps.totalSteps)}</label>
@@ -656,11 +983,11 @@ export default function GoalsPage() {
                     <label className="label">{t(GK.steps.valuePerStep)} ({currency})</label>
                     <input
                       className="input"
-                      type="number"
-                      step="0.01"
-                      min="0.01"
+                      type="text"
+                      inputMode="decimal"
                       value={stepValue}
-                      onChange={(e) => setStepValue(e.target.value)}
+                      onChange={(e) => setStepValue(cleanMoneyInput(e.target.value))}
+                      placeholder={getMoneyPlaceholder(currency, locale)}
                       required
                     />
                   </div>
@@ -710,6 +1037,29 @@ export default function GoalsPage() {
                   border: "1px solid var(--border-primary)"
                 }}>
                   <h3 style={{ fontSize: "1rem", fontWeight: 600, marginBottom: "1rem" }}>{t(GK.monthly.title)}</h3>
+
+                  <div className="form-group">
+                    <label className="label">{t(GK.fields.targetValue)} ({currency})</label>
+                    <input
+                      className="input"
+                      type="text"
+                      inputMode="decimal"
+                      value={formData.target_value_cents > 0 ? formatMoneyInput(formData.target_value_cents) : ""}
+                      onChange={(e) => {
+                        const cleaned = cleanMoneyInput(e.target.value);
+                        const targetCents = parseMoneyInput(cleaned);
+                        setFormData({ ...formData, target_value_cents: targetCents });
+                        const { months: nextMonths, endDate } = calculateMonthsForTarget(targetCents);
+                        const nextKey = nextMonths.slice().sort((a, b) => a - b).join(",");
+                        const currentKey = monthNumbers.slice().sort((a, b) => a - b).join(",");
+                        if (nextKey !== currentKey) {
+                          setMonthNumbers(nextMonths);
+                        }
+                        setEditingEndDate(endDate);
+                      }}
+                      placeholder={getMoneyPlaceholder(currency, locale)}
+                    />
+                  </div>
                   
                   <div className="form-group">
                     <label className="label">{t(GK.monthly.selectedMonths)}</label>
@@ -787,11 +1137,11 @@ export default function GoalsPage() {
                       <label className="label">{t(GK.monthly.valuePerDay)} ({currency})</label>
                       <input
                         className="input"
-                        type="number"
-                        step="0.01"
-                        min="0.01"
+                        type="text"
+                        inputMode="decimal"
                         value={dayValue}
-                        onChange={(e) => setDayValue(e.target.value)}
+                        onChange={(e) => setDayValue(cleanMoneyInput(e.target.value))}
+                        placeholder={getMoneyPlaceholder(currency, locale)}
                         required
                       />
                     </div>
@@ -831,11 +1181,14 @@ export default function GoalsPage() {
                   <label className="label">{t(GK.free.targetValue)} ({currency})</label>
                   <input
                   className="input"
-                  type="number"
-                  step="0.01"
-                    min="0.01"
-                  value={formData.target_value_cents / 100}
-                  onChange={(e) => setFormData({ ...formData, target_value_cents: Math.round(parseFloat(e.target.value) * 100) || 0 })}
+                  type="text"
+                  inputMode="decimal"
+                  value={formData.target_value_cents > 0 ? formatMoneyInput(formData.target_value_cents) : ""}
+                  onChange={(e) => {
+                    const cleaned = cleanMoneyInput(e.target.value);
+                    setFormData({ ...formData, target_value_cents: parseMoneyInput(cleaned) });
+                  }}
+                    placeholder={getMoneyPlaceholder(currency, locale)}
                     required
                   />
                 </div>
@@ -922,7 +1275,7 @@ export default function GoalsPage() {
                   const cleaned = cleanMoneyInput(e.target.value);
                   setDepositData({ ...depositData, amount_cents: cleaned });
                 }}
-                placeholder="0"
+                placeholder={getMoneyPlaceholder(settings.currency, locale)}
                 required
               />
             </div>
@@ -966,7 +1319,7 @@ export default function GoalsPage() {
                   const cleaned = cleanMoneyInput(e.target.value);
                   setWithdrawData({ ...withdrawData, amount_cents: cleaned });
                 }}
-                placeholder="0"
+                placeholder={getMoneyPlaceholder(settings.currency, locale)}
                 required
               />
             </div>

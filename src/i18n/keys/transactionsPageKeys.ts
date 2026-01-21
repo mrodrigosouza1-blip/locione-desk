@@ -32,5 +32,9 @@ export const TPK = {
     goalWithdraw: "transactionsPage.types.goalWithdraw",
     creditCardCharge: "transactionsPage.types.creditCardCharge",
   },
+
+  // Paginação simples
+  showMore: "transactionsPage.showMore",
+  showLess: "transactionsPage.showLess",
 } as const;
 

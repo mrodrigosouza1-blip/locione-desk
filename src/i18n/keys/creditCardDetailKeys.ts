@@ -30,9 +30,17 @@ export const CCDK = {
   },
   messages: {
     insufficientLimit: "creditCardDetail.messages.insufficientLimit",
+    accountRequired: "creditCardDetail.messages.accountRequired",
+    accountNotFound: "creditCardDetail.messages.accountNotFound",
+    currencyMismatch: "creditCardDetail.messages.currencyMismatch",
+    noAccountsSameCurrency: "creditCardDetail.messages.noAccountsSameCurrency",
   },
   purchaseDetails: {
     totalPurchase: "creditCardDetail.purchaseDetails.totalPurchase",
+  },
+  sections: {
+    currentInvoicePurchases: "creditCardDetail.sections.currentInvoicePurchases",
+    futureInstallments: "creditCardDetail.sections.futureInstallments",
   },
 } as const;
 

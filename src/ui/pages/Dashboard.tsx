@@ -7,7 +7,7 @@ import { settingsRepository } from "../../infra/repositories/settingsRepository"
 import { formatDateString, formatMoneyWithSecondary } from "../../utils/format";
 import MoneyDisplay from "../components/MoneyDisplay";
 import Topbar from "../components/Topbar";
-import { Wallet, CreditCard, TrendingUp, TrendingDown, Receipt, Plus, Sun, Moon } from "lucide-react";
+import { Wallet, CreditCard, TrendingUp, TrendingDown, Receipt, Plus, Sun, Moon, AlertTriangle } from "lucide-react";
 import { format, startOfMonth, endOfMonth } from "date-fns";
 import { useI18n } from "../../i18n/I18nProvider";
 import { DK } from "../../i18n/keys/dashboardKeys";
@@ -56,6 +56,148 @@ export default function Dashboard() {
       return "light";
     }
   });
+
+  function hashString(input: string) {
+    let hash = 0;
+    for (let i = 0; i < input.length; i += 1) {
+      hash = (hash << 5) - hash + input.charCodeAt(i);
+      hash |= 0;
+    }
+    return Math.abs(hash);
+  }
+
+  function pickVariant<T>(items: T[], seed: string): T {
+    if (items.length === 1) return items[0];
+    const idx = hashString(seed) % items.length;
+    return items[idx];
+  }
+
+  const alerts = (() => {
+    const items: Array<{ id: string; message: string; tone: "warning" | "info" | "danger" }> = [];
+    const todayKey = format(new Date(), "yyyy-MM-dd");
+
+    accounts.forEach((account) => {
+      if (account?.is_system) return;
+      const balance = account.balance ?? 0;
+      const initial = Math.max(0, account.initial_balance_cents || 0);
+      if (balance < 0) {
+        items.push({
+          id: `account-negative-${account.id}`,
+          message: t(
+            pickVariant(
+              [DK.alerts.accountNegative, DK.alerts.accountNegativeAlt1, DK.alerts.accountNegativeAlt2],
+              `account-negative-${account.id}-${todayKey}`
+            ),
+            {
+            account: account.name,
+            amount: formatMoneyWithSecondary(
+              Math.abs(balance),
+              account.currency_code || settings.currency,
+              fullSettings ?? undefined
+            ).primary,
+          }
+          ),
+          tone: "danger",
+        });
+        return;
+      }
+
+      if (initial > 0) {
+        const lowThreshold = Math.round(initial * 0.1);
+        if (balance <= lowThreshold) {
+          items.push({
+            id: `account-low-${account.id}`,
+            message: t(
+              pickVariant(
+                [DK.alerts.accountLow, DK.alerts.accountLowAlt1, DK.alerts.accountLowAlt2],
+                `account-low-${account.id}-${todayKey}`
+              ),
+              {
+              account: account.name,
+            amount: formatMoneyWithSecondary(
+              balance,
+              account.currency_code || settings.currency,
+              fullSettings ?? undefined
+            ).primary,
+            }
+            ),
+            tone: "warning",
+          });
+        }
+      }
+    });
+
+    creditCards.forEach((card) => {
+      const limitTotal = card.limit_cents || 0;
+      if (limitTotal <= 0) return;
+      const available = card.limit_available_cents || 0;
+      const percent = (available / limitTotal) * 100;
+      if (percent <= 20) {
+        items.push({
+          id: `card-limit-${card.id}`,
+          message: t(
+            pickVariant(
+              [DK.alerts.cardLimitLow, DK.alerts.cardLimitLowAlt1, DK.alerts.cardLimitLowAlt2],
+              `card-limit-${card.id}-${todayKey}`
+            ),
+            {
+            card: card.name,
+            percent: percent.toFixed(0),
+            amount: formatMoneyWithSecondary(
+              available,
+              card.currency_code || settings.currency,
+              fullSettings ?? undefined
+            ).primary,
+          }
+          ),
+          tone: percent <= 10 ? "danger" : "warning",
+        });
+      }
+    });
+
+    if (budgetSummary?.hasBudget) {
+      if (budgetSummary.isOver) {
+        items.push({
+          id: "budget-over",
+          message: t(
+            pickVariant(
+              [DK.alerts.budgetExceeded, DK.alerts.budgetExceededAlt1, DK.alerts.budgetExceededAlt2],
+              `budget-over-${todayKey}`
+            ),
+            {
+            amount: formatMoneyWithSecondary(
+              Math.abs(budgetSummary.remainingCents),
+              settings.currency,
+              fullSettings ?? undefined
+            ).primary,
+          }
+          ),
+          tone: "danger",
+        });
+      } else if (budgetSummary.isCritical) {
+        items.push({
+          id: "budget-critical",
+          message: t(
+            pickVariant(
+              [DK.alerts.budgetCritical, DK.alerts.budgetCriticalAlt1, DK.alerts.budgetCriticalAlt2],
+              `budget-critical-${todayKey}`
+            ),
+            {
+            percent: budgetSummary.percent.toFixed(1),
+            amount: formatMoneyWithSecondary(
+              budgetSummary.remainingCents,
+              settings.currency,
+              fullSettings ?? undefined
+            ).primary,
+          }
+          ),
+          tone: "warning",
+        });
+      }
+    }
+
+    return items;
+  })();
   
   // Sincronizar tema com o DOM ao montar
   useEffect(() => {
@@ -211,6 +353,37 @@ export default function Dashboard() {
         showLockNow={true}
       />
       <div className="content-area">
+
+        <div className="card" style={{ marginBottom: "2rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1rem" }}>
+            <AlertTriangle size={20} />
+            <h2 style={{ fontSize: "1.125rem", fontWeight: 600 }}>{t(DK.alerts.title)}</h2>
+          </div>
+          {alerts.length === 0 ? (
+            <div style={{ color: "var(--text-secondary)", fontSize: "0.875rem" }}>
+              {t(DK.alerts.empty)}
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+              {alerts.map((alert) => (
+                <div
+                  key={alert.id}
+                  style={{
+                    padding: "0.75rem",
+                    borderRadius: "6px",
+                    border: "1px solid var(--border-color)",
+                    background: "var(--bg-secondary)",
+                    color: alert.tone === "danger" ? "var(--error)" : alert.tone === "warning" ? "var(--warning)" : "var(--text-primary)",
+                    fontSize: "0.875rem",
+                    fontWeight: 500,
+                  }}
+                >
+                  {alert.message}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         <div className="grid grid-2" style={{ marginBottom: "2rem" }}>
           {accounts.map((account) => (

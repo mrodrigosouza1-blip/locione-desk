@@ -123,35 +123,35 @@ function App() {
   );
 
   return (
-    <ErrorBoundary>
-      <I18nProvider>
-        <ToastProvider>
+    <I18nProvider>
+      <ToastProvider>
+        <ErrorBoundary>
           <LicenseStoreProvider>
             <AppGate safeMode={safeMode}>
-            {useHash ? (
-              <HashRouter
-                future={{
-                  v7_startTransition: true,
-                  v7_relativeSplatPath: true,
-                }}
-              >
-                <RoutesContent />
-              </HashRouter>
-            ) : (
-              <BrowserRouter
-                future={{
-                  v7_startTransition: true,
-                  v7_relativeSplatPath: true,
-                }}
-              >
-                <RoutesContent />
-              </BrowserRouter>
-            )}
+              {useHash ? (
+                <HashRouter
+                  future={{
+                    v7_startTransition: true,
+                    v7_relativeSplatPath: true,
+                  }}
+                >
+                  <RoutesContent />
+                </HashRouter>
+              ) : (
+                <BrowserRouter
+                  future={{
+                    v7_startTransition: true,
+                    v7_relativeSplatPath: true,
+                  }}
+                >
+                  <RoutesContent />
+                </BrowserRouter>
+              )}
             </AppGate>
           </LicenseStoreProvider>
-        </ToastProvider>
-      </I18nProvider>
-    </ErrorBoundary>
+        </ErrorBoundary>
+      </ToastProvider>
+    </I18nProvider>
   );
 }
 

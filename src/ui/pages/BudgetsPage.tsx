@@ -4,7 +4,7 @@ import { categoryRepository } from "../../infra/repositories/categoryRepository"
 import { formatMoneyWithSecondary } from "../../utils/format";
 import { settingsRepository } from "../../infra/repositories/settingsRepository";
 import MoneyDisplay from "../components/MoneyDisplay";
-import { parseMoneyInput, formatMoneyInput, cleanMoneyInput } from "../utils/moneyInput";
+import { parseMoneyInput, formatMoneyInput, cleanMoneyInput, getMoneyPlaceholder } from "../utils/moneyInput";
 import Topbar from "../components/Topbar";
 import Modal from "../components/Modal";
 import { Plus, PieChart, Edit, Trash2, AlertCircle, Filter } from "lucide-react";
@@ -52,6 +52,7 @@ export default function BudgetsPage() {
       return null;
     }
   });
+  const locale = fullSettings?.preferences.locale ?? "pt-BR";
 
   useEffect(() => {
     loadBudgets();
@@ -460,7 +461,7 @@ export default function BudgetsPage() {
                   const cleaned = cleanMoneyInput(e.target.value);
                   setFormData({ ...formData, amount_cents: cleaned });
                 }}
-                placeholder="0"
+                placeholder={getMoneyPlaceholder(settings.currency, locale)}
                 required
               />
             </div>

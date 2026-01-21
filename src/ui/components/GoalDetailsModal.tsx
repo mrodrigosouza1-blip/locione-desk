@@ -1,8 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { goalRepository } from "../../infra/repositories/goalRepository";
 import { accountRepository } from "../../infra/repositories/accountRepository";
 import { transactionRepository } from "../../infra/repositories/transactionRepository";
 import { getDatabase, saveDatabaseAsync, getOrCreateMetaVaultAccount } from "../../infra/database";
+import { settingsRepository } from "../../infra/repositories/settingsRepository";
 import { formatMoney } from "../../utils/format";
 import Modal from "./Modal";
 import type { Goal } from "../../domain/types";
@@ -12,6 +13,7 @@ import { GK } from "../../i18n/keys/goalsKeys";
 import { AK } from "../../i18n/keys/appKeys";
 import { useToast } from "../hooks/useToast";
 import { logger } from "../../utils/logger";
+import { cleanMoneyInput, getMoneyPlaceholder, parseMoneyInput } from "../utils/moneyInput";
 
 interface GoalDetailsModalProps {
   isOpen: boolean;
@@ -29,6 +31,25 @@ export default function GoalDetailsModal({ isOpen, onClose, goalId, onSuccess, i
   const [sourceAccountId, setSourceAccountId] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(false);
   const [mode, setMode] = useState<"deposit" | "withdraw">(initialMode);
+  const [fullSettings] = useState(() => {
+    try {
+      return settingsRepository.getSettings();
+    } catch {
+      return null;
+    }
+  });
+  const locale = fullSettings?.preferences.locale ?? "pt-BR";
+
+  const isMetaVaultAccount = (account: any) =>
+    account?.is_system === true && typeof account?.name === "string" && account.name.startsWith("Cofre Metas");
+
+  const goalCurrency = goal?.currency_code || "BRL";
+  const eligibleAccounts = useMemo(() => {
+    return accounts.filter(
+      (account) =>
+        !isMetaVaultAccount(account) && (account.currency_code || "BRL") === goalCurrency
+    );
+  }, [accounts, goalCurrency]);
   
   // Estados para resgate
   const [withdrawAmount, setWithdrawAmount] = useState<string>("");
@@ -41,6 +62,7 @@ export default function GoalDetailsModal({ isOpen, onClose, goalId, onSuccess, i
   // Estados para "Por mês"
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1);
   const [selectedDates, setSelectedDates] = useState<Set<string>>(new Set());
+  const [depositedDates, setDepositedDates] = useState<Set<string>>(new Set());
 
   // Estado para "Livre"
   const [freeAmount, setFreeAmount] = useState<string>("");
@@ -65,7 +87,7 @@ export default function GoalDetailsModal({ isOpen, onClose, goalId, onSuccess, i
     try {
       const config = typeof goal.config === "string" ? JSON.parse(goal.config) : goal.config;
       if (config.steps_total) return "steps";
-      if (config.month_numbers) return "monthly";
+      if (config.month_numbers || config.months_selected) return "monthly";
     } catch {
       // Ignorar erro de parse
     }
@@ -105,6 +127,27 @@ export default function GoalDetailsModal({ isOpen, onClose, goalId, onSuccess, i
         
         setDepositedSteps(deposited);
       }
+
+      // Carregar dias já depositados (apenas para metas tipo monthly)
+      if (normalizedGoal.type === "monthly") {
+        const movements = await goalRepository.getMovements(goalId);
+        const deposited = new Set<string>();
+
+        for (const movement of movements) {
+          if (movement.type === "deposit" && movement.meta?.selected_units) {
+            const units = movement.meta.selected_units;
+            if (Array.isArray(units)) {
+              for (const unit of units) {
+                if (typeof unit === "string") {
+                  deposited.add(unit);
+                }
+              }
+            }
+          }
+        }
+
+        setDepositedDates(deposited);
+      }
     }
   }
 
@@ -116,6 +159,20 @@ export default function GoalDetailsModal({ isOpen, onClose, goalId, onSuccess, i
       setDestinationAccountId(accs[0].id);
     }
   }
+
+  useEffect(() => {
+    if (eligibleAccounts.length > 0) {
+      setSourceAccountId((current) =>
+        eligibleAccounts.some((account) => account.id === current) ? current : eligibleAccounts[0].id
+      );
+      setDestinationAccountId((current) =>
+        eligibleAccounts.some((account) => account.id === current) ? current : eligibleAccounts[0].id
+      );
+    } else {
+      setSourceAccountId(0);
+      setDestinationAccountId(0);
+    }
+  }, [eligibleAccounts]);
   
   useEffect(() => {
     if (initialMode) {
@@ -185,6 +242,16 @@ export default function GoalDetailsModal({ isOpen, onClose, goalId, onSuccess, i
   async function handleConfirmDeposit() {
     if (!goal || !sourceAccountId) {
       toast.warning(t(GK.messages.selectAccount));
+      return;
+    }
+
+    const selectedSource = accounts.find((account) => account.id === sourceAccountId);
+    if (!selectedSource) {
+      toast.warning(t(GK.messages.accountNotFound));
+      return;
+    }
+    if ((selectedSource.currency_code || "BRL") !== goalCurrency) {
+      toast.warning(t(GK.messages.currencyMismatch));
       return;
     }
 
@@ -287,7 +354,7 @@ export default function GoalDetailsModal({ isOpen, onClose, goalId, onSuccess, i
       return;
     }
 
-    const amountCents = Math.round(parseFloat(withdrawAmount || "0") * 100);
+    const amountCents = parseMoneyInput(withdrawAmount);
     
     // Validações
     if (amountCents <= 0) {
@@ -308,7 +375,7 @@ export default function GoalDetailsModal({ isOpen, onClose, goalId, onSuccess, i
       return;
     }
 
-    if (destinationAccount.currency_code !== goal.currency_code) {
+    if ((destinationAccount.currency_code || "BRL") !== goalCurrency) {
       toast.warning(t(GK.messages.currencyMismatch) || "A conta destino deve ter a mesma moeda da meta");
       return;
     }
@@ -395,12 +462,37 @@ export default function GoalDetailsModal({ isOpen, onClose, goalId, onSuccess, i
   const deposited = goal.deposited_amount || 0;
   const percentage = goal.target_value_cents ? (deposited / goal.target_value_cents) * 100 : 0;
   const depositAmount = calculateDepositAmount();
-  const withdrawAmountCents = Math.round(parseFloat(withdrawAmount || "0") * 100);
+  const withdrawAmountCents = parseMoneyInput(withdrawAmount);
   const availableBalance = deposited;
+  const fixedValueText = (() => {
+    if (!goal.config) return null;
+    let config: any;
+    try {
+      config = typeof goal.config === "string" ? JSON.parse(goal.config) : goal.config;
+    } catch {
+      return null;
+    }
+    const goalType = detectGoalType(goal);
+    if (goalType === "steps" && config.mode === "fixed" && config.fixed_amount_cents) {
+      return t(GK.details.fixedValue, { value: formatMoney(config.fixed_amount_cents, goal.currency_code) });
+    }
+    if (goalType === "monthly" && (config.daily_value_mode === "fixed_per_day" || config.mode === "fixed") && config.fixed_amount_cents) {
+      return t(GK.details.fixedValuePerDay, { value: formatMoney(config.fixed_amount_cents, goal.currency_code) });
+    }
+    return null;
+  })();
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={t(GDK.titleWithName, { name: goal.name })}>
       <div style={{ padding: "1rem" }}>
+        <div style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginBottom: "0.5rem" }}>
+          {t(GK.fields.type)}: {t(GK.types[detectGoalType(goal)])}
+        </div>
+        {fixedValueText && (
+          <div style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginBottom: "0.5rem" }}>
+            {fixedValueText}
+          </div>
+        )}
         {/* Progresso */}
         <div style={{ marginBottom: "1.5rem" }}>
           <div style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginBottom: "0.25rem" }}>
@@ -481,6 +573,7 @@ export default function GoalDetailsModal({ isOpen, onClose, goalId, onSuccess, i
                 setSelectedMonth={setSelectedMonth}
                 selectedDates={selectedDates}
                 setSelectedDates={setSelectedDates}
+                depositedDates={depositedDates}
               />
             )}
 
@@ -500,14 +593,20 @@ export default function GoalDetailsModal({ isOpen, onClose, goalId, onSuccess, i
                 value={sourceAccountId}
                 onChange={(e) => setSourceAccountId(parseInt(e.target.value))}
                 required
+                disabled={eligibleAccounts.length === 0}
               >
                 <option value="">{t(GK.details.selectAccount)}</option>
-                {accounts.map((account) => (
+                {eligibleAccounts.map((account) => (
                   <option key={account.id} value={account.id}>
                     {account.name} ({account.currency_code || "BRL"})
                   </option>
                 ))}
               </select>
+              {eligibleAccounts.length === 0 && (
+                <div style={{ fontSize: "0.75rem", color: "var(--warning)", marginTop: "0.25rem" }}>
+                  {t(GK.messages.currencyMismatch)}
+                </div>
+              )}
             </div>
 
             {/* Valor a depositar */}
@@ -567,13 +666,13 @@ export default function GoalDetailsModal({ isOpen, onClose, goalId, onSuccess, i
               <label className="label">{t(GK.modals.withdraw.amount) || "Valor a resgatar"}</label>
               <input
                 className="input"
-                type="number"
-                step="0.01"
+                type="text"
+                inputMode="decimal"
                 min="0.01"
                 max={availableBalance / 100}
                 value={withdrawAmount}
-                onChange={(e) => setWithdrawAmount(e.target.value)}
-                placeholder="0.00"
+                onChange={(e) => setWithdrawAmount(cleanMoneyInput(e.target.value))}
+                placeholder={getMoneyPlaceholder(goalCurrency, locale)}
                 required
               />
               {withdrawAmountCents > availableBalance && (
@@ -591,19 +690,18 @@ export default function GoalDetailsModal({ isOpen, onClose, goalId, onSuccess, i
                 value={destinationAccountId}
                 onChange={(e) => setDestinationAccountId(parseInt(e.target.value))}
                 required
+                disabled={eligibleAccounts.length === 0}
               >
                 <option value="">{t(GK.modals.withdraw.selectAccount)}</option>
-                {accounts
-                  .filter(account => account.currency_code === goal.currency_code)
-                  .map((account) => (
+                {eligibleAccounts.map((account) => (
                     <option key={account.id} value={account.id}>
                       {account.name} ({account.currency_code || "BRL"})
                     </option>
                   ))}
               </select>
-              {accounts.filter(a => a.currency_code === goal.currency_code).length === 0 && (
+              {eligibleAccounts.length === 0 && (
                 <div style={{ fontSize: "0.75rem", color: "var(--warning)", marginTop: "0.25rem" }}>
-                  Nenhuma conta disponível com a moeda {goal.currency_code}
+                  {t(GK.messages.currencyMismatch)}
                 </div>
               )}
             </div>
@@ -832,12 +930,13 @@ function StepsDepositUI({ goal, selectedSteps, setSelectedSteps, depositedSteps 
 }
 
 // Componente para UI de "Por mês"
-function MonthlyDepositUI({ goal, selectedMonth, setSelectedMonth, selectedDates, setSelectedDates }: {
+function MonthlyDepositUI({ goal, selectedMonth, setSelectedMonth, selectedDates, setSelectedDates, depositedDates }: {
   goal: Goal;
   selectedMonth: number;
   setSelectedMonth: (month: number) => void;
   selectedDates: Set<string>;
   setSelectedDates: (dates: Set<string>) => void;
+  depositedDates: Set<string>;
 }) {
   const { t } = useI18n();
   if (!goal.config) return <div>{t(GK.details.configNotFound)}</div>;
@@ -850,7 +949,13 @@ function MonthlyDepositUI({ goal, selectedMonth, setSelectedMonth, selectedDates
   }
 
   const year = config.year || new Date().getFullYear();
-  const monthNumbers = config.month_numbers || [];
+  const monthNumbers = config.month_numbers || config.months_selected || [];
+  const startDateStr = config.start_date;
+  const startDate = startDateStr ? new Date(startDateStr + "T00:00:00") : null;
+  const minMonth = startDate ? startDate.getMonth() + 1 : null;
+  const minYear = startDate ? startDate.getFullYear() : null;
+  const minDayForSelectedMonth =
+    startDate && selectedMonth === minMonth && year === minYear ? startDate.getDate() : 1;
 
   const monthNames = [
     "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
@@ -872,7 +977,13 @@ function MonthlyDepositUI({ goal, selectedMonth, setSelectedMonth, selectedDates
   const daysArray = Array.from({ length: days }, (_, i) => i + 1);
 
   const toggleDate = (day: number) => {
+    if (day < minDayForSelectedMonth) {
+      return;
+    }
     const dateStr = `${year}-${String(selectedMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    if (depositedDates.has(dateStr)) {
+      return;
+    }
     const newSet = new Set(selectedDates);
     if (newSet.has(dateStr)) {
       newSet.delete(dateStr);
@@ -947,24 +1058,31 @@ function MonthlyDepositUI({ goal, selectedMonth, setSelectedMonth, selectedDates
             {/* Dias do mês */}
             {daysArray.map((day) => {
               const isSelected = isDateSelected(day);
+              const dateStr = `${year}-${String(selectedMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+              const isDeposited = depositedDates.has(dateStr);
+              const isDisabled = day < minDayForSelectedMonth || isDeposited;
               return (
                 <button
                   key={day}
                   type="button"
                   onClick={() => toggleDate(day)}
+                  disabled={isDisabled}
                   style={{
                     padding: "0.5rem",
                     borderRadius: "4px",
                     border: `2px solid ${isSelected ? "var(--accent-primary)" : "var(--border-primary)"}`,
-                    background: isSelected ? "var(--accent-primary)" : "var(--bg-primary)",
-                    color: isSelected ? "white" : "var(--text-primary)",
-                    cursor: "pointer",
+                    background: isSelected ? "var(--accent-primary)" : isDeposited ? "var(--bg-tertiary)" : "var(--bg-primary)",
+                    color: isSelected ? "white" : isDeposited ? "var(--text-secondary)" : "var(--text-primary)",
+                    cursor: isDisabled ? "not-allowed" : "pointer",
                     fontSize: "0.875rem",
                     fontWeight: isSelected ? 600 : 400,
-                    transition: "all 0.2s"
+                    transition: "all 0.2s",
+                    opacity: isDisabled ? 0.5 : 1
                   }}
+                  title={isDeposited ? t(GK.display.stepAlreadyDeposited) : undefined}
                 >
                   {day}
+                  {isDeposited && " ✓"}
                 </button>
               );
             })}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { transactionRepository } from "../../infra/repositories/transactionRepository";
 import { accountRepository } from "../../infra/repositories/accountRepository";
 import { creditCardRepository } from "../../infra/repositories/creditCardRepository";
@@ -7,7 +7,7 @@ import { categoryRepository } from "../../infra/repositories/categoryRepository"
 import { formatDateString } from "../../utils/format";
 import { settingsRepository } from "../../infra/repositories/settingsRepository";
 import MoneyDisplay from "../components/MoneyDisplay";
-import { parseMoneyInput, formatMoneyInput, cleanMoneyInput } from "../utils/moneyInput";
+import { parseMoneyInput, formatMoneyInput, cleanMoneyInput, getMoneyPlaceholder } from "../utils/moneyInput";
 import { getDatabase } from "../../infra/database";
 import Topbar, { type TopbarPeriod } from "../components/Topbar";
 import Modal from "../components/Modal";
@@ -28,10 +28,12 @@ import { illustrations } from "../../assets/illustrations";
 
 export default function TransactionsPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { t } = useI18n();
   const toast = useToast();
   const [transactions, setTransactions] = useState<any[]>([]);
   const [search, setSearch] = useState("");
+  const [showAll, setShowAll] = useState(false);
   const [period, setPeriod] = useState<TopbarPeriod>("month");
   const [settings] = useState(() => {
     try {
@@ -47,6 +49,7 @@ export default function TransactionsPage() {
       return null;
     }
   });
+  const locale = fullSettings?.preferences.locale ?? "pt-BR";
 
   // Estados dos modais
   const [isSelectorOpen, setIsSelectorOpen] = useState(false);
@@ -57,6 +60,8 @@ export default function TransactionsPage() {
   const [accounts, setAccounts] = useState<any[]>([]);
   const [creditCards, setCreditCards] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
+  const isMetaVaultAccount = (account: any) =>
+    account?.is_system === true && typeof account?.name === "string" && account.name.startsWith("Cofre Metas");
 
   // Formulário de transação de conta
   const [accountFormData, setAccountFormData] = useState({
@@ -79,6 +84,10 @@ export default function TransactionsPage() {
     installments: 1,
     category_id: 1,
   });
+  const accountCurrency =
+    accounts.find((account) => account.id === accountFormData.account_id)?.currency_code || settings.currency;
+  const cardCurrency =
+    creditCards.find((card) => card.id === cardFormData.credit_card_id)?.currency_code || settings.currency;
 
   useEffect(() => {
     loadTransactions();
@@ -86,6 +95,10 @@ export default function TransactionsPage() {
     loadCreditCards();
     loadCategories();
   }, []);
+
+  useEffect(() => {
+    setShowAll(false);
+  }, [location.pathname]);
 
   async function loadTransactions() {
     const trans = await transactionRepository.findAll();
@@ -95,8 +108,9 @@ export default function TransactionsPage() {
   async function loadAccounts() {
     const accs = await accountRepository.findAll();
     setAccounts(accs);
-    if (accs.length > 0 && accountFormData.account_id === 0) {
-      setAccountFormData({ ...accountFormData, account_id: accs[0].id });
+    const usableAccounts = accs.filter((account) => !isMetaVaultAccount(account));
+    if (usableAccounts.length > 0 && accountFormData.account_id === 0) {
+      setAccountFormData({ ...accountFormData, account_id: usableAccounts[0].id });
     }
   }
 
@@ -294,6 +308,8 @@ export default function TransactionsPage() {
   const filteredTransactions = transactions.filter((t) =>
     t.description?.toLowerCase().includes(search.toLowerCase())
   );
+  const displayedTransactions = showAll ? filteredTransactions : filteredTransactions.slice(0, 5);
+  const remainingCount = Math.max(filteredTransactions.length - displayedTransactions.length, 0);
 
   return (
     <>
@@ -350,7 +366,7 @@ export default function TransactionsPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredTransactions.map((transaction) => {
+                {displayedTransactions.map((transaction) => {
                   const getTypeLabel = () => {
                     switch (transaction.type) {
                       case "income": return t(TPK.types.income);
@@ -383,6 +399,19 @@ export default function TransactionsPage() {
               </tbody>
             </table>
           )}
+          {filteredTransactions.length > 5 && (
+            <div style={{ marginTop: "1rem", display: "flex", justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setShowAll((current) => !current)}
+              >
+                {showAll
+                  ? t(TPK.showLess)
+                  : t(TPK.showMore, { count: remainingCount })}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -409,11 +438,13 @@ export default function TransactionsPage() {
               required
             >
               <option value={0}>Selecione uma conta</option>
-              {accounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.name}
-                </option>
-              ))}
+              {accounts
+                .filter((account) => !isMetaVaultAccount(account))
+                .map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.name}
+                  </option>
+                ))}
             </select>
           </div>
           <div className="form-group">
@@ -429,7 +460,7 @@ export default function TransactionsPage() {
             </select>
           </div>
           <div className="form-group">
-            <label className="label">{t(AKC.transactionFields.amount)} ({settings.currency})</label>
+            <label className="label">{t(AKC.transactionFields.amount)} ({accountCurrency})</label>
             <input
               className="input"
               type="text"
@@ -439,7 +470,7 @@ export default function TransactionsPage() {
                 const cleaned = cleanMoneyInput(e.target.value);
                 setAccountFormData({ ...accountFormData, amount_cents: cleaned });
               }}
-              placeholder="0"
+              placeholder={getMoneyPlaceholder(accountCurrency, locale)}
               required
             />
           </div>
@@ -523,7 +554,7 @@ export default function TransactionsPage() {
             </select>
           </div>
           <div className="form-group">
-            <label className="label">{t(CCDK.modals.newPurchase.fields.amount)} ({settings.currency})</label>
+            <label className="label">{t(CCDK.modals.newPurchase.fields.amount)} ({cardCurrency})</label>
             <input
               className="input"
               type="text"
@@ -533,7 +564,7 @@ export default function TransactionsPage() {
                 const cleaned = cleanMoneyInput(e.target.value);
                 setCardFormData({ ...cardFormData, amount_cents: cleaned });
               }}
-              placeholder="0"
+              placeholder={getMoneyPlaceholder(cardCurrency, locale)}
               required
             />
           </div>

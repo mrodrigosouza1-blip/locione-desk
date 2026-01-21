@@ -15,6 +15,7 @@ import { RK } from "../../i18n/keys/reportsKeys";
 import Modal from "./Modal";
 import DatePicker from "./DatePicker";
 import { Upload, FileText, AlertCircle } from "lucide-react";
+import { cleanMoneyInput, formatMoneyInput, getMoneyPlaceholder, parseMoneyInput } from "../utils/moneyInput";
 
 interface ImportReceiptModalProps {
   isOpen: boolean;
@@ -51,7 +52,13 @@ export default function ImportReceiptModal({
       return { currency: "BRL", date_format: "DD/MM/YYYY", theme: "light" as const };
     }
   });
-
+  const [fullSettings] = useState(() => {
+    try {
+      return settingsRepository.getSettings();
+    } catch {
+      return null;
+    }
+  });
   const [formData, setFormData] = useState({
     amount_cents: 0,
     date: new Date().toISOString().split("T")[0],
@@ -63,6 +70,11 @@ export default function ImportReceiptModal({
     destination_id: 0,
     installments: 1,
   });
+  const locale = fullSettings?.preferences.locale ?? "pt-BR";
+  const destinationCurrency =
+    (formData.destination_type === "account"
+      ? accounts.find((account) => account.id === formData.destination_id)?.currency_code
+      : cards.find((card) => card.id === formData.destination_id)?.currency_code) || settings.currency;
 
   useEffect(() => {
     if (isOpen) {
@@ -634,15 +646,16 @@ export default function ImportReceiptModal({
                           </td>
                           <td>
                             <input
-                              type="number"
-                              step="0.01"
-                              value={(finalItem.amount_cents || 0) / 100}
+                              type="text"
+                              inputMode="decimal"
+                              value={formatMoneyInput(finalItem.amount_cents || 0)}
                               onChange={(e) => {
+                                const cleaned = cleanMoneyInput(e.target.value);
                                 const newEdited = new Map(editedItems);
                                 const current = newEdited.get(item.id) || {};
                                 newEdited.set(item.id, {
                                   ...current,
-                                  amount_cents: Math.round(parseFloat(e.target.value) * 100) || 0,
+                                  amount_cents: parseMoneyInput(cleaned),
                                 });
                                 setEditedItems(newEdited);
                               }}
@@ -653,7 +666,7 @@ export default function ImportReceiptModal({
                                 border: "1px solid var(--border)",
                                 borderRadius: "4px",
                               }}
-                              placeholder={t(IRK.placeholders.amount)}
+                              placeholder={getMoneyPlaceholder(destinationCurrency, locale)}
                             />
                           </td>
                           <td>
@@ -807,16 +820,18 @@ export default function ImportReceiptModal({
             </label>
             <input
               className="input"
-              type="number"
-              step="0.01"
-              value={formData.amount_cents / 100}
+              type="text"
+              inputMode="decimal"
+              value={formatMoneyInput(formData.amount_cents)}
               onChange={(e) => {
+                const cleaned = cleanMoneyInput(e.target.value);
                 setFormData({
                   ...formData,
-                  amount_cents: Math.round(parseFloat(e.target.value) * 100) || 0,
+                  amount_cents: parseMoneyInput(cleaned),
                 });
                 setSelectedAmountIndex(null); // Desmarcar seleção se editar manualmente
               }}
+              placeholder={getMoneyPlaceholder(destinationCurrency, locale)}
               required
               style={{
                 borderColor: parsedData?.amountCandidates && parsedData.amountCandidates.length === 0 

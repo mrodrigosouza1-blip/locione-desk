@@ -11,6 +11,7 @@ export const GK = {
   // Empty states
   empty: {
     title: "goals.empty.title",
+    completedOnly: "goals.empty.completedOnly",
   },
   
   // Fields
@@ -36,6 +37,8 @@ export const GK = {
     month: "goals.details.month",
     selectDates: "goals.details.selectDates",
     depositAmount: "goals.details.depositAmount",
+    fixedValue: "goals.details.fixedValue",
+    fixedValuePerDay: "goals.details.fixedValuePerDay",
   },
   
   // Goal types
@@ -111,6 +114,27 @@ export const GK = {
     details: "goals.display.details",
     withdraw: "goals.display.withdraw",
     stepAlreadyDeposited: "goals.display.stepAlreadyDeposited",
+  },
+
+  completed: {
+    show: "goals.completed.show",
+    hide: "goals.completed.hide",
+    badge: "goals.completed.badge",
+  },
+
+  motivation: {
+    noTarget: "goals.motivation.noTarget",
+    noTargetAlt: "goals.motivation.noTargetAlt",
+    firstDeposit: "goals.motivation.firstDeposit",
+    firstDepositAlt: "goals.motivation.firstDepositAlt",
+    start: "goals.motivation.start",
+    startAlt: "goals.motivation.startAlt",
+    mid: "goals.motivation.mid",
+    midAlt: "goals.motivation.midAlt",
+    strong: "goals.motivation.strong",
+    strongAlt: "goals.motivation.strongAlt",
+    finalStretch: "goals.motivation.finalStretch",
+    finalStretchAlt: "goals.motivation.finalStretchAlt",
   },
   
   // Modals

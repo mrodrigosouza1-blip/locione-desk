@@ -19,7 +19,7 @@ export function parseMoneyInput(inputValue: string): number {
   const cleaned = inputValue.replace(/[^\d.,]/g, "");
   
   // Substitui vírgula por ponto para parseFloat
-  const normalized = cleaned.replace(",", ".");
+  const normalized = cleaned.replace(/,/g, ".");
   
   const parsed = parseFloat(normalized);
   if (isNaN(parsed) || !isFinite(parsed)) {
@@ -28,6 +28,52 @@ export function parseMoneyInput(inputValue: string): number {
   
   // Converter para centavos
   return Math.round(parsed * 100);
+}
+
+export function getDecimalSeparator(locale: string): string {
+  try {
+    const parts = new Intl.NumberFormat(locale).formatToParts(1.1);
+    return parts.find((part) => part.type === "decimal")?.value || ".";
+  } catch {
+    return ".";
+  }
+}
+
+export function formatMoneyInputLocalized(cents: number, locale: string): string {
+  if (cents === 0) {
+    return "";
+  }
+  const base = (cents / 100).toFixed(2);
+  const separator = getDecimalSeparator(locale);
+  return separator === "." ? base : base.replace(".", separator);
+}
+
+export function getMoneyPlaceholder(currencyCode: string, locale: string): string {
+  try {
+    const resolvedLocale = getLocaleForCurrency(currencyCode, locale);
+    const currencyFormatter = new Intl.NumberFormat(resolvedLocale, { style: "currency", currency: currencyCode });
+    const { minimumFractionDigits, maximumFractionDigits } = currencyFormatter.resolvedOptions();
+    const numberFormatter = new Intl.NumberFormat(resolvedLocale, { minimumFractionDigits, maximumFractionDigits });
+    return `Ex: ${numberFormatter.format(0)}`;
+  } catch {
+    return "Ex: 0.00";
+  }
+}
+
+function getLocaleForCurrency(currencyCode: string, fallbackLocale: string): string {
+  const normalized = (currencyCode || "").toUpperCase();
+  switch (normalized) {
+    case "BRL":
+      return "pt-BR";
+    case "EUR":
+      return "it-IT";
+    case "USD":
+      return "en-US";
+    case "GBP":
+      return "en-GB";
+    default:
+      return fallbackLocale;
+  }
 }
 
 /**

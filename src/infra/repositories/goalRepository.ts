@@ -1,11 +1,12 @@
 import { getDatabase, saveDatabaseAsync } from "../database";
 import type { Goal, CreateGoalDto, GoalMovement } from "../../domain/types";
 import { getGoalBalanceCents } from "../../domain/goals/goalService";
+import { emitAppEvent } from "../../ui/state/appEvents";
 
 export const goalRepository = {
   async findAll(): Promise<Goal[]> {
     const db = getDatabase();
-    return db.goals.sort((a: Goal, b: Goal) => b.created_at.localeCompare(a.created_at));
+    return [...db.goals].sort((a: Goal, b: Goal) => b.created_at.localeCompare(a.created_at));
   },
 
   async findById(id: number): Promise<Goal | undefined> {
@@ -29,6 +30,7 @@ export const goalRepository = {
     };
     db.goals.push(goal);
     await saveDatabaseAsync();
+    emitAppEvent("data:changed");
     return goal;
   },
 
@@ -66,6 +68,7 @@ export const goalRepository = {
       ...updatedGoal,
     };
     await saveDatabaseAsync();
+    emitAppEvent("data:changed");
     return db.goals[index];
   },
 
@@ -84,6 +87,7 @@ export const goalRepository = {
     // Excluir meta
     db.goals = db.goals.filter((g) => g.id !== id);
     await saveDatabaseAsync();
+    emitAppEvent("data:changed");
   },
 
   // Movimentos (depósitos e resgates)
@@ -115,6 +119,7 @@ export const goalRepository = {
     // para evitar duplicação
     
     await saveDatabaseAsync();
+    emitAppEvent("data:changed");
     return newMovement;
   },
 

@@ -68,8 +68,18 @@ a {
   text-decoration: none;
 }
 
+a:visited {
+  color: var(--accent-primary);
+}
+
 a:hover {
   color: var(--accent-hover);
+}
+
+a:active,
+a:focus {
+  color: var(--accent-hover);
+  outline: none;
 }
 
 .card {

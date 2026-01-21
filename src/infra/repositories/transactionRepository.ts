@@ -58,6 +58,19 @@ export const transactionRepository = {
       return await this.createTransfer(data);
     }
 
+    // REGRA: Bloquear compra no cartão sem limite disponível
+    if (data.credit_card_id && data.type === "credit_card_charge") {
+      const card = await creditCardRepository.findById(data.credit_card_id);
+      if (!card) {
+        throw new Error("Cartão não encontrado");
+      }
+      const amount = Math.abs(data.amount_cents);
+      if (card.limit_available_cents < amount) {
+        const { t } = getI18n();
+        throw new Error(t(TRK.messages.insufficientLimit));
+      }
+    }
+
     const newId = db.transactions.length > 0 ? Math.max(...db.transactions.map((t) => t.id)) + 1 : 1;
     
     // REGRA: Entrada (receita) = positivo, Saída (despesa) = negativo
@@ -157,6 +170,10 @@ export const transactionRepository = {
     if (data.credit_card_id) {
       const card = await creditCardRepository.findById(data.credit_card_id);
       if (card) {
+        if (card.limit_available_cents < totalAmount) {
+          const { t } = getI18n();
+          throw new Error(t(TRK.messages.insufficientLimit));
+        }
         closingDay = card.closing_day;
       }
     }

@@ -5,7 +5,7 @@ import { transactionRepository } from "../../infra/repositories/transactionRepos
 import { formatDateString } from "../../utils/format";
 import { settingsRepository } from "../../infra/repositories/settingsRepository";
 import MoneyDisplay from "../components/MoneyDisplay";
-import { parseMoneyInput, formatMoneyInput, cleanMoneyInput } from "../utils/moneyInput";
+import { parseMoneyInput, formatMoneyInput, cleanMoneyInput, getMoneyPlaceholder } from "../utils/moneyInput";
 import { getDatabase, getOrCreateMetaVaultAccount } from "../../infra/database";
 import Topbar from "../components/Topbar";
 import Modal from "../components/Modal";
@@ -60,6 +60,8 @@ export default function AccountDetailPage() {
       return null;
     }
   });
+  const locale = fullSettings?.preferences.locale ?? "pt-BR";
+  const accountCurrency = account?.currency_code || settings.currency;
 
   // Carregar categorias ordenadas (Sem categoria primeiro, depois alfabético)
   const getSortedCategories = () => {
@@ -102,18 +104,18 @@ export default function AccountDetailPage() {
         const vaultAccount = await getOrCreateMetaVaultAccount(currency);
         const vaultBalance = await accountRepository.getBalance(vaultAccount.id);
         
-        // Saldo sem metas = saldo normal da conta atual (já inclui as saídas para o cofre)
+        // Saldo sem metas = saldo normal da conta atual
         // Saldo total das metas = saldo da conta "Cofre Metas"
         // Saldo com metas = saldo conta atual + saldo cofre metas
-        const balanceWithGoalsValue = balance + vaultBalance;
+        const balanceWithoutGoalsValue = balance;
         
         setAccount({
           ...acc,
           balance,
         });
-        setBalanceWithGoals(balanceWithGoalsValue);
-        setBalanceWithoutGoals(balance); // Saldo sem metas = saldo normal (já reduzido)
-        setGoalsTotalCents(vaultBalance); // Saldo total das metas = saldo do cofre
+        setBalanceWithGoals(balance + vaultBalance);
+        setBalanceWithoutGoals(balanceWithoutGoalsValue);
+        setGoalsTotalCents(vaultBalance);
       }
     }
   }
@@ -248,60 +250,74 @@ export default function AccountDetailPage() {
           </div>
         </div>
 
-        <div style={{ marginBottom: "2rem", display: "flex", justifyContent: "flex-end" }}>
-          <button className="btn btn-primary" onClick={() => setIsModalOpen(true)}>
-            <Plus size={16} />
-            {t(ADK.newTransaction)}
-          </button>
-        </div>
+        {!(() => account.is_system === true && account.name.startsWith("Cofre Metas"))() && (
+          <div style={{ marginBottom: "2rem", display: "flex", justifyContent: "flex-end" }}>
+            <button className="btn btn-primary" onClick={() => setIsModalOpen(true)}>
+              <Plus size={16} />
+              {t(ADK.newTransaction)}
+            </button>
+          </div>
+        )}
 
         <div className="card">
           <h2 style={{ fontSize: "1.25rem", fontWeight: 600, marginBottom: "1rem" }}>{t(ADK.transactions)}</h2>
-          {transactions.length === 0 ? (
-            <div className="empty-state">
-              <p>{t(ADK.empty.title)}</p>
-            </div>
-          ) : (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>{t(ADK.table.date)}</th>
-                  <th>{t(ADK.table.description)}</th>
-                  <th>{t(ADK.table.category)}</th>
-                  <th>{t(ADK.table.type)}</th>
-                  <th>{t(ADK.table.amount)}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {transactions.map((transaction) => {
-                  const db = getDatabase();
-                  const category = db.categories?.find((c: any) => c.id === transaction.category_id);
-                  const categoryName = category?.name || t(AK.common.none);
-                  return (
-                    <tr key={transaction.id}>
-                      <td>{formatDateString(transaction.date)}</td>
-                      <td>{transaction.description || "-"}</td>
-                      <td>{categoryName}</td>
-                      <td>{getTxTypeLabel(t, transaction.type)}</td>
-                      <td style={{ color: transaction.amount_cents >= 0 ? "var(--success)" : "var(--error)" }}>
-                        <MoneyDisplay
-                          amountCents={transaction.amount_cents}
-                          currencyCode={account.currency_code || settings.currency}
-                          settings={fullSettings}
-                          primaryStyle={{ display: "inline" }}
-                          secondaryStyle={{ display: "inline", marginLeft: "0.25rem", fontSize: "0.7rem" }}
-                        />
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
+          {(() => {
+            const isMetaVault = account.is_system === true && account.name.startsWith("Cofre Metas");
+            const visibleTransactions = isMetaVault
+              ? transactions.filter((transaction) => (transaction.description || "").toLowerCase().includes("meta"))
+              : transactions;
+
+            if (visibleTransactions.length === 0) {
+              return (
+                <div className="empty-state">
+                  <p>{t(ADK.empty.title)}</p>
+                </div>
+              );
+            }
+
+            return (
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>{t(ADK.table.date)}</th>
+                    <th>{t(ADK.table.description)}</th>
+                    <th>{t(ADK.table.category)}</th>
+                    <th>{t(ADK.table.type)}</th>
+                    <th>{t(ADK.table.amount)}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleTransactions.map((transaction) => {
+                    const db = getDatabase();
+                    const category = db.categories?.find((c: any) => c.id === transaction.category_id);
+                    const categoryName = category?.name || t(AK.common.none);
+                    return (
+                      <tr key={transaction.id}>
+                        <td>{formatDateString(transaction.date)}</td>
+                        <td>{transaction.description || "-"}</td>
+                        <td>{categoryName}</td>
+                        <td>{getTxTypeLabel(t, transaction.type)}</td>
+                        <td style={{ color: transaction.amount_cents >= 0 ? "var(--success)" : "var(--error)" }}>
+                          <MoneyDisplay
+                            amountCents={transaction.amount_cents}
+                            currencyCode={account.currency_code || settings.currency}
+                            settings={fullSettings}
+                            primaryStyle={{ display: "inline" }}
+                            secondaryStyle={{ display: "inline", marginLeft: "0.25rem", fontSize: "0.7rem" }}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            );
+          })()}
         </div>
 
-        <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={t(AK.common.newTransaction)}>
-          <form onSubmit={handleSubmit}>
+        {!(() => account.is_system === true && account.name.startsWith("Cofre Metas"))() && (
+          <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={t(AK.common.newTransaction)}>
+            <form onSubmit={handleSubmit}>
             <div className="form-group">
               <label className="label">{t(AKC.transactionFields.type)}</label>
               <select
@@ -315,7 +331,7 @@ export default function AccountDetailPage() {
               </select>
             </div>
             <div className="form-group">
-              <label className="label">{t(AKC.transactionFields.amount)} ({settings.currency})</label>
+              <label className="label">{t(AKC.transactionFields.amount)} ({accountCurrency})</label>
               <input
                 className="input"
                 type="text"
@@ -325,7 +341,7 @@ export default function AccountDetailPage() {
                   const cleaned = cleanMoneyInput(e.target.value);
                   setFormData({ ...formData, amount_cents: cleaned });
                 }}
-                placeholder="0"
+                placeholder={getMoneyPlaceholder(accountCurrency, locale)}
                 required
               />
             </div>
@@ -382,8 +398,9 @@ export default function AccountDetailPage() {
                 {t(AK.common.save)}
               </button>
             </div>
-          </form>
-        </Modal>
+            </form>
+          </Modal>
+        )}
       </div>
     </>
   );

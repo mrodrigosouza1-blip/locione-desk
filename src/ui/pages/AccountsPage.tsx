@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { accountRepository } from "../../infra/repositories/accountRepository";
 import { settingsRepository } from "../../infra/repositories/settingsRepository";
-import { parseMoneyInput, formatMoneyInput, cleanMoneyInput } from "../utils/moneyInput";
+import { parseMoneyInput, formatMoneyInput, cleanMoneyInput, getMoneyPlaceholder } from "../utils/moneyInput";
 import MoneyDisplay from "../components/MoneyDisplay";
 import Topbar from "../components/Topbar";
 import Modal from "../components/Modal";
@@ -43,6 +43,9 @@ export default function AccountsPage() {
       return null;
     }
   });
+  const locale = fullSettings?.preferences.locale ?? "pt-BR";
+  const isMetaVaultAccount = (account: any) =>
+    account?.is_system === true && typeof account?.name === "string" && account.name.startsWith("Cofre Metas");
   const [formData, setFormData] = useState(() => {
     try {
       const s = settingsRepository.get();
@@ -232,24 +235,26 @@ export default function AccountsPage() {
                   >
                     {account.name}
                   </h3>
-                  <div style={{ display: "flex", gap: "0.5rem" }} onClick={(e) => e.stopPropagation()}>
-                    <button
-                      className="btn btn-secondary"
-                      style={{ padding: "0.25rem", minWidth: "auto" }}
-                      onClick={() => handleEdit(account)}
-                      title={t(AK.common.edit)}
-                    >
-                      <Edit size={16} />
-                    </button>
-                    <button
-                      className="btn btn-secondary"
-                      style={{ padding: "0.25rem", minWidth: "auto", color: "var(--error)" }}
-                      onClick={() => handleDeleteClick(account)}
-                      title={t(AK.common.delete)}
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
+                  {!isMetaVaultAccount(account) && (
+                    <div style={{ display: "flex", gap: "0.5rem" }} onClick={(e) => e.stopPropagation()}>
+                      <button
+                        className="btn btn-secondary"
+                        style={{ padding: "0.25rem", minWidth: "auto" }}
+                        onClick={() => handleEdit(account)}
+                        title={t(AK.common.edit)}
+                      >
+                        <Edit size={16} />
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        style={{ padding: "0.25rem", minWidth: "auto", color: "var(--error)" }}
+                        onClick={() => handleDeleteClick(account)}
+                        title={t(AK.common.delete)}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <div 
                   style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginBottom: "0.5rem", cursor: "pointer" }}
@@ -331,7 +336,7 @@ export default function AccountsPage() {
                   const cleaned = cleanMoneyInput(e.target.value);
                   setFormData({ ...formData, initial_balance_cents: cleaned });
                 }}
-                placeholder="0"
+                placeholder={getMoneyPlaceholder(formData.currency_code, locale)}
                 required
               />
             </div>

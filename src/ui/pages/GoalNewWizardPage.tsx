@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { goalRepository } from "../../infra/repositories/goalRepository";
 import { settingsRepository } from "../../infra/repositories/settingsRepository";
@@ -29,6 +29,14 @@ export default function GoalNewWizardPage() {
       return { currency: "BRL", date_format: "DD/MM/YYYY", theme: "light" as const };
     }
   });
+  const [fullSettings] = useState(() => {
+    try {
+      return settingsRepository.getSettings();
+    } catch {
+      return null;
+    }
+  });
+  const locale = fullSettings?.preferences.locale ?? "pt-BR";
 
   // Etapa 1: Tipo
   const [goalType, setGoalType] = useState<GoalType | "">("");
@@ -44,6 +52,81 @@ export default function GoalNewWizardPage() {
   const [mode, setMode] = useState<Mode>("fixed");
   const [fixedAmountCents, setFixedAmountCents] = useState(0);
   const [selectedMonths, setSelectedMonths] = useState<number[]>([]);
+
+  const today = useMemo(() => new Date(), []);
+  const todayYear = today.getFullYear();
+  const todayMonth = today.getMonth() + 1;
+  const todayDay = today.getDate();
+  const year = todayYear;
+  const monthOrder = useMemo(() => {
+    const currentMonth = todayMonth;
+    return Array.from({ length: 12 }, (_, index) => ((currentMonth + index - 1) % 12) + 1);
+  }, [todayMonth]);
+
+  const monthContributionCents = (monthNum: number, valueMode: Mode, fixedAmount: number) => {
+    const days = new Date(year, monthNum, 0).getDate();
+    const startDay =
+      year === todayYear && monthNum === todayMonth ? todayDay : 1;
+    if (startDay > days) return 0;
+    const remainingDays = days - startDay + 1;
+    if (valueMode === "fixed") {
+      return remainingDays * fixedAmount;
+    }
+    const totalUnits = (remainingDays * (startDay + days)) / 2;
+    return Math.round(totalUnits * 100);
+  };
+
+  useEffect(() => {
+    if (!targetValueCents || targetValueCents <= 0) return;
+
+    if (goalType === "steps") {
+      if (mode === "fixed") {
+        if (fixedAmountCents <= 0) return;
+        const stepsNeeded = Math.max(1, Math.ceil(targetValueCents / fixedAmountCents));
+        if (stepsTotal !== "custom" || customStepsTotal !== stepsNeeded) {
+          setStepsTotal("custom");
+          setCustomStepsTotal(stepsNeeded);
+        }
+      } else {
+        const targetUnits = Math.max(1, Math.ceil(targetValueCents / 100));
+        const stepsNeeded = Math.max(1, Math.ceil((Math.sqrt(1 + 8 * targetUnits) - 1) / 2));
+        if (stepsTotal !== "custom" || customStepsTotal !== stepsNeeded) {
+          setStepsTotal("custom");
+          setCustomStepsTotal(stepsNeeded);
+        }
+      }
+    }
+
+    if (goalType === "monthly") {
+      if (mode === "fixed" && fixedAmountCents <= 0) return;
+      const computedMonths: number[] = [];
+      let remaining = targetValueCents;
+      for (const monthNum of monthOrder) {
+        if (remaining <= 0) break;
+        const contribution = monthContributionCents(monthNum, mode, fixedAmountCents);
+        if (contribution <= 0) continue;
+        computedMonths.push(monthNum);
+        remaining -= contribution;
+      }
+      if (computedMonths.length === 0) return;
+      const sortedMonths = [...computedMonths].sort((a, b) => a - b);
+      const currentKey = selectedMonths.slice().sort((a, b) => a - b).join(",");
+      const nextKey = sortedMonths.join(",");
+      if (currentKey !== nextKey) {
+        setSelectedMonths(sortedMonths);
+      }
+    }
+  }, [
+    goalType,
+    mode,
+    targetValueCents,
+    fixedAmountCents,
+    stepsTotal,
+    customStepsTotal,
+    selectedMonths,
+    monthOrder,
+    year,
+  ]);
 
   // Validações
   const isStep1Valid = goalType !== "";
@@ -95,8 +178,10 @@ export default function GoalNewWizardPage() {
           config.fixed_amount_cents = fixedAmountCents;
         }
       } else if (goalType === "monthly") {
-        config.months_selected = selectedMonths;
-        config.mode = mode;
+        config.month_numbers = selectedMonths;
+        config.daily_value_mode = mode === "fixed" ? "fixed_per_day" : "day_value";
+        config.year = new Date().getFullYear();
+        config.start_date = new Date().toISOString().split("T")[0];
         if (mode === "fixed") {
           config.fixed_amount_cents = fixedAmountCents;
         }
@@ -226,6 +311,7 @@ export default function GoalNewWizardPage() {
                   value={targetValueCents}
                   onChange={setTargetValueCents}
                   currencyCode={currencyCode}
+                  locale={locale}
                   required
                   min={1}
                 />

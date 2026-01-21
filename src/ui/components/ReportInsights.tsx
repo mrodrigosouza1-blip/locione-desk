@@ -16,9 +16,25 @@ export default function ReportInsights({
   balance,
   balanceVariation,
   balanceVariationPercent,
+  totalExpense,
   currency,
 }: ReportInsightsProps) {
   const { t } = useI18n();
+  function hashString(input: string) {
+    let hash = 0;
+    for (let i = 0; i < input.length; i += 1) {
+      hash = (hash << 5) - hash + input.charCodeAt(i);
+      hash |= 0;
+    }
+    return Math.abs(hash);
+  }
+
+  function pickVariant(keys: string[], seed: string) {
+    if (keys.length === 1) return keys[0];
+    const idx = hashString(seed) % keys.length;
+    return keys[idx];
+  }
+
   if (expensesByCategory.length === 0) {
     return (
       <div className="card">
@@ -36,6 +52,7 @@ export default function ReportInsights({
   // Encontrar categoria que mais impactou
   const topCategory = expensesByCategory[0];
   const topCategoryPercent = topCategory?.percent || 0;
+  const seedBase = `${topCategory?.categoryId || "none"}-${currency}-${Math.round(balanceVariationPercent)}`;
 
   // Gerar insights
   const insights: string[] = [];
@@ -44,14 +61,24 @@ export default function ReportInsights({
   if (topCategory) {
     const impactText =
       topCategoryPercent > 30
-        ? t("reports.insights.impactSignificant")
+        ? t(pickVariant(["reports.insights.impactSignificant", "reports.insights.impactSignificantAlt"], `${seedBase}-impact-strong`))
         : topCategoryPercent > 15
-        ? t("reports.insights.impactRelevant")
-        : t("reports.insights.impactParticipation");
+        ? t(pickVariant(["reports.insights.impactRelevant", "reports.insights.impactRelevantAlt"], `${seedBase}-impact-mid`))
+        : t(pickVariant(["reports.insights.impactParticipation", "reports.insights.impactParticipationAlt"], `${seedBase}-impact-low`));
     insights.push(
-      t("reports.insights.periodSelected", {
+      t(pickVariant(["reports.insights.periodSelected", "reports.insights.periodSelectedAlt"], `${seedBase}-period`), {
         category: topCategory.categoryName,
         impact: impactText,
+        percent: topCategoryPercent.toFixed(1),
+        amount: formatCurrency(topCategory.amount, { currency }),
+      })
+    );
+  }
+
+  if (topCategoryPercent >= 40) {
+    insights.push(
+      t(pickVariant(["reports.insights.highConcentration", "reports.insights.highConcentrationAlt"], `${seedBase}-concentration`), {
+        category: topCategory.categoryName,
         percent: topCategoryPercent.toFixed(1),
         amount: formatCurrency(topCategory.amount, { currency }),
       })
@@ -62,40 +89,62 @@ export default function ReportInsights({
   if (balance > 0) {
     if (balanceVariation > 0) {
       insights.push(
-        t("reports.insights.positiveBalance", {
+        t(pickVariant(["reports.insights.positiveBalance", "reports.insights.positiveBalanceAlt"], `${seedBase}-pos-up`), {
           amount: formatCurrency(balance, { currency }),
           percent: Math.abs(balanceVariationPercent).toFixed(1),
         })
       );
     } else if (balanceVariation < 0) {
       insights.push(
-        t("reports.insights.positiveBalanceLower", {
+        t(pickVariant(["reports.insights.positiveBalanceLower", "reports.insights.positiveBalanceLowerAlt"], `${seedBase}-pos-down`), {
           amount: formatCurrency(balance, { currency }),
           percent: Math.abs(balanceVariationPercent).toFixed(1),
         })
       );
     } else {
       insights.push(
-        t("reports.insights.positiveBalanceSimple", { amount: formatCurrency(balance, { currency }) })
+        t(pickVariant(["reports.insights.positiveBalanceSimple", "reports.insights.positiveBalanceSimpleAlt"], `${seedBase}-pos-flat`), { amount: formatCurrency(balance, { currency }) })
       );
     }
   } else if (balance < 0) {
     if (balanceVariation < 0) {
       insights.push(
-        t("reports.insights.negativeBalance", {
+        t(pickVariant(["reports.insights.negativeBalance", "reports.insights.negativeBalanceAlt"], `${seedBase}-neg-down`), {
           amount: formatCurrency(Math.abs(balance), { currency }),
           percent: Math.abs(balanceVariationPercent).toFixed(1),
         })
       );
     } else {
       insights.push(
-        t("reports.insights.negativeBalanceImproved", {
+        t(pickVariant(["reports.insights.negativeBalanceImproved", "reports.insights.negativeBalanceImprovedAlt"], `${seedBase}-neg-up`), {
           amount: formatCurrency(Math.abs(balance), { currency }),
         })
       );
     }
   } else {
-    insights.push(t("reports.insights.balanced", { amount: formatCurrency(balance, { currency }) }));
+    insights.push(t(pickVariant(["reports.insights.balanced", "reports.insights.balancedAlt"], `${seedBase}-balanced`), { amount: formatCurrency(balance, { currency }) }));
+  }
+
+  if (totalExpense > 0 && balance < 0) {
+    insights.push(
+      t(pickVariant(["reports.insights.expenseOverIncome", "reports.insights.expenseOverIncomeAlt"], `${seedBase}-over`), {
+        amount: formatCurrency(Math.abs(balance), { currency }),
+      })
+    );
+  }
+
+  if (Math.abs(balanceVariationPercent) >= 20) {
+    insights.push(
+      t(
+        pickVariant(
+          balanceVariation > 0
+            ? ["reports.insights.balanceChangeUp", "reports.insights.balanceChangeUpAlt"]
+            : ["reports.insights.balanceChangeDown", "reports.insights.balanceChangeDownAlt"],
+          `${seedBase}-variation`
+        ),
+        { percent: Math.abs(balanceVariationPercent).toFixed(1) }
+      )
+    );
   }
 
   // Insight sobre distribuição de gastos
@@ -103,7 +152,7 @@ export default function ReportInsights({
     const secondCategory = expensesByCategory[1];
     if (secondCategory && secondCategory.percent > 10) {
       insights.push(
-        t("reports.insights.distribution", {
+        t(pickVariant(["reports.insights.distribution", "reports.insights.distributionAlt"], `${seedBase}-distribution`), {
           cat1: topCategory.categoryName,
           p1: topCategoryPercent.toFixed(1),
           cat2: secondCategory.categoryName,
@@ -113,9 +162,13 @@ export default function ReportInsights({
     }
   }
 
+  if (expensesByCategory.length >= 3 && topCategoryPercent < 25) {
+    insights.push(t(pickVariant(["reports.insights.diversified", "reports.insights.diversifiedAlt"], `${seedBase}-diverse`)));
+  }
+
   // Se não houver insights suficientes, adicionar um genérico
   if (insights.length === 0) {
-    insights.push(t("reports.insights.generic"));
+    insights.push(t(pickVariant(["reports.insights.generic", "reports.insights.genericAlt"], `${seedBase}-generic`)));
   }
 
   return (

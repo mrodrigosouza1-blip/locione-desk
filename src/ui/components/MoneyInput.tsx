@@ -1,4 +1,10 @@
 import React from "react";
+import {
+  cleanMoneyInput,
+  formatMoneyInputLocalized,
+  getMoneyPlaceholder,
+  parseMoneyInput,
+} from "../utils/moneyInput";
 
 interface MoneyInputProps {
   label: string;
@@ -8,6 +14,7 @@ interface MoneyInputProps {
   required?: boolean;
   placeholder?: string;
   min?: number;
+  locale?: string;
 }
 
 export default function MoneyInput({
@@ -18,12 +25,13 @@ export default function MoneyInput({
   required,
   placeholder,
   min = 0,
+  locale = "pt-BR",
 }: MoneyInputProps) {
-  const displayValue = value / 100;
+  const displayValue = formatMoneyInputLocalized(value, locale);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const inputValue = parseFloat(e.target.value) || 0;
-    const cents = Math.round(inputValue * 100);
+    const cleaned = cleanMoneyInput(e.target.value);
+    const cents = parseMoneyInput(cleaned);
     onChange(cents);
   };
 
@@ -34,12 +42,13 @@ export default function MoneyInput({
       </label>
       <input
         className="input"
-        type="number"
+        type="text"
+        inputMode="decimal"
         step="0.01"
         min={min / 100}
         value={displayValue || ""}
         onChange={handleChange}
-        placeholder={placeholder || "0.00"}
+        placeholder={placeholder || getMoneyPlaceholder(currencyCode, locale)}
         required={required}
       />
     </div>

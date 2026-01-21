@@ -47,13 +47,12 @@ npm install
 
 #### Rodar WEB + Electron juntos (recomendado)
 ```bash
-pnpm dev:electron
+pnpm dev
 ```
 Este comando automaticamente:
-- Libera a porta 1420 se estiver ocupada
 - Inicia o servidor Vite (WEB)
-- Aguarda o servidor estar pronto
-- Inicia o Electron
+- Inicia o Electron em paralelo
+Se precisar rodar separado, veja a opção abaixo.
 
 #### Rodar separadamente (dois terminais)
 

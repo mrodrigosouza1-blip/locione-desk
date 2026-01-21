@@ -3,6 +3,9 @@
  * Usado para descrições padrão de transferências.
  */
 export const TRK = {
+  messages: {
+    insufficientLimit: "transactionRepository.messages.insufficientLimit",
+  },
   transfer: {
     toAccount: "transactionRepository.transfer.toAccount",
     fromAccount: "transactionRepository.transfer.fromAccount",

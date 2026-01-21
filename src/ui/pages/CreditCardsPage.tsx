@@ -16,6 +16,7 @@ import { requireGate } from "../../services/requireGate";
 import { getUsageCounters } from "../../services/usageCounters";
 import EmptyState from "../../shared/components/EmptyState";
 import { illustrations } from "../../assets/illustrations";
+import { cleanMoneyInput, formatMoneyInput, getMoneyPlaceholder, parseMoneyInput } from "../utils/moneyInput";
 
 export default function CreditCardsPage() {
   const navigate = useNavigate();
@@ -50,6 +51,7 @@ export default function CreditCardsPage() {
       return null;
     }
   });
+  const locale = fullSettings?.preferences.locale ?? "pt-BR";
 
   useEffect(() => {
     loadCards();
@@ -62,7 +64,9 @@ export default function CreditCardsPage() {
       const invoice = await creditCardRepository.getCurrentInvoice(card.id, new Date());
       return {
         ...card,
-        invoice,
+        invoice: {
+          total_cents: invoice,
+        },
       };
     }));
     setCards(cardsWithInvoice);
@@ -312,10 +316,14 @@ export default function CreditCardsPage() {
                 <label className="label">{t(CCK.fields.limitTotal)} ({settings.currency})</label>
                 <input
                   className="input"
-                  type="number"
-                  step="0.01"
-                  value={formData.limit_total_cents / 100}
-                  onChange={(e) => setFormData({ ...formData, limit_total_cents: Math.round(parseFloat(e.target.value) * 100) || 0 })}
+                  type="text"
+                  inputMode="decimal"
+                  value={formatMoneyInput(formData.limit_total_cents)}
+                  onChange={(e) => {
+                    const cleaned = cleanMoneyInput(e.target.value);
+                    setFormData({ ...formData, limit_total_cents: parseMoneyInput(cleaned) });
+                  }}
+                  placeholder={getMoneyPlaceholder(settings.currency, locale)}
                   required
                 />
               </div>
@@ -323,10 +331,14 @@ export default function CreditCardsPage() {
                 <label className="label">{t(CCK.fields.limitAvailableInitial)} ({settings.currency})</label>
                 <input
                   className="input"
-                  type="number"
-                  step="0.01"
-                  value={formData.limit_available_cents / 100}
-                  onChange={(e) => setFormData({ ...formData, limit_available_cents: Math.round(parseFloat(e.target.value) * 100) || 0 })}
+                  type="text"
+                  inputMode="decimal"
+                  value={formatMoneyInput(formData.limit_available_cents)}
+                  onChange={(e) => {
+                    const cleaned = cleanMoneyInput(e.target.value);
+                    setFormData({ ...formData, limit_available_cents: parseMoneyInput(cleaned) });
+                  }}
+                  placeholder={getMoneyPlaceholder(settings.currency, locale)}
                   required
                 />
               </div>

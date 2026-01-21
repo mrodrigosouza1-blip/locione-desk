@@ -1,13 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { creditCardRepository } from "../../infra/repositories/creditCardRepository";
 import { transactionRepository } from "../../infra/repositories/transactionRepository";
 import { accountRepository } from "../../infra/repositories/accountRepository";
 import { categoryRepository } from "../../infra/repositories/categoryRepository";
-import { formatDateString, formatMoney } from "../../utils/format";
+import { formatDateString } from "../../utils/format";
 import { settingsRepository } from "../../infra/repositories/settingsRepository";
 import MoneyDisplay from "../components/MoneyDisplay";
-import { parseMoneyInput, formatMoneyInput, cleanMoneyInput } from "../utils/moneyInput";
+import { parseMoneyInput, formatMoneyInput, cleanMoneyInput, getMoneyPlaceholder } from "../utils/moneyInput";
 import { getCurrentInvoice, getInvoiceForCycle, type InvoiceItem } from "../../domain/invoiceService";
 import { addMonths, format, parse } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -64,6 +64,18 @@ export default function CreditCardDetailPage() {
       return null;
     }
   });
+  const locale = fullSettings?.preferences.locale ?? "pt-BR";
+
+  const cardCurrency = card?.currency_code || settings.currency;
+  const isMetaVaultAccount = (account: any) =>
+    account?.is_system === true && typeof account?.name === "string" && account.name.startsWith("Cofre Metas");
+  const paymentAccounts = useMemo(
+    () =>
+      accounts.filter(
+        (account) => !isMetaVaultAccount(account) && (account.currency_code || settings.currency) === cardCurrency
+      ),
+    [accounts, cardCurrency, settings.currency]
+  );
 
   async function loadCard() {
     if (!id) return;
@@ -136,6 +148,20 @@ export default function CreditCardDetailPage() {
     }
   }, [id]);
 
+  useEffect(() => {
+    if (!card) return;
+    if (paymentAccounts.length > 0) {
+      setPaymentData((current) => ({
+        ...current,
+        account_id: paymentAccounts.some((a) => a.id === current.account_id)
+          ? current.account_id
+          : paymentAccounts[0].id,
+      }));
+    } else {
+      setPaymentData((current) => ({ ...current, account_id: 0 }));
+    }
+  }, [card, paymentAccounts]);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!id) return;
@@ -190,6 +216,22 @@ export default function CreditCardDetailPage() {
     e.preventDefault();
     if (!id) return;
 
+    if (!paymentData.account_id) {
+      toast.warning(t(CCDK.messages.accountRequired));
+      return;
+    }
+
+    const selectedAccount = accounts.find((account) => account.id === paymentData.account_id);
+    if (!selectedAccount) {
+      toast.error(t(CCDK.messages.accountNotFound));
+      return;
+    }
+
+    if ((selectedAccount.currency_code || settings.currency) !== cardCurrency) {
+      toast.warning(t(CCDK.messages.currencyMismatch));
+      return;
+    }
+
     // Converter string para centavos no submit
     const rawPaymentAmount = typeof paymentData.amount_cents === "string" 
       ? parseMoneyInput(paymentData.amount_cents)
@@ -215,7 +257,7 @@ export default function CreditCardDetailPage() {
     setIsPaymentModalOpen(false);
     setPaymentData({
       amount_cents: "",
-      account_id: accounts[0]?.id || 0,
+      account_id: paymentAccounts[0]?.id || 0,
       date: new Date().toISOString().split("T")[0],
     });
     
@@ -250,7 +292,7 @@ export default function CreditCardDetailPage() {
               <div className="page-subtitle">{t(CCK.currentInvoice)}</div>
               <MoneyDisplay
                 amountCents={currentInvoice?.invoice_total_cents || 0}
-                currencyCode={settings.currency}
+                currencyCode={cardCurrency}
                 settings={fullSettings}
                 primaryStyle={{ fontSize: "1.5rem", fontWeight: 600 }}
               />
@@ -259,7 +301,7 @@ export default function CreditCardDetailPage() {
               <div className="page-subtitle">{t(CCK.availableLimit)}</div>
               <MoneyDisplay
                 amountCents={card.limit_available_cents}
-                currencyCode={settings.currency}
+                currencyCode={cardCurrency}
                 settings={fullSettings}
                 primaryStyle={{ fontSize: "1.5rem", fontWeight: 600 }}
               />
@@ -325,7 +367,7 @@ export default function CreditCardDetailPage() {
                 </div>
                 <MoneyDisplay
                   amountCents={currentInvoice.invoice_total_cents}
-                  currencyCode={settings.currency}
+                  currencyCode={cardCurrency}
                   settings={fullSettings}
                   primaryStyle={{ fontSize: "1.5rem", fontWeight: 600 }}
                 />
@@ -354,7 +396,7 @@ export default function CreditCardDetailPage() {
                                   {t(CCDK.purchaseDetails.totalPurchase)}:{" "}
                                   <MoneyDisplay
                                     amountCents={item.total_purchase_amount_cents}
-                                    currencyCode={settings.currency}
+                                    currencyCode={cardCurrency}
                                     settings={fullSettings}
                                     primaryStyle={{ display: "inline" }}
                                     secondaryStyle={{ display: "inline", marginLeft: "0.25rem", fontSize: "0.7rem" }}
@@ -370,7 +412,7 @@ export default function CreditCardDetailPage() {
                       <td style={{ color: "var(--error)", fontWeight: 500 }}>
                         <MoneyDisplay
                           amountCents={item.amount_cents}
-                          currencyCode={settings.currency}
+                          currencyCode={cardCurrency}
                           settings={fullSettings}
                           primaryStyle={{ display: "inline" }}
                           secondaryStyle={{ display: "inline", marginLeft: "0.25rem", fontSize: "0.7rem" }}
@@ -385,8 +427,8 @@ export default function CreditCardDetailPage() {
         </div>
 
         <div className="card" style={{ marginTop: "2rem" }}>
-          <h2 style={{ fontSize: "1.25rem", fontWeight: 600, marginBottom: "1rem" }}>{t(CCK.transactions)}</h2>
-          {transactions.length === 0 ? (
+          <h2 style={{ fontSize: "1.25rem", fontWeight: 600, marginBottom: "1rem" }}>{t(CCDK.sections.currentInvoicePurchases)}</h2>
+          {transactions.filter((transaction) => transaction.type === "credit_card_charge" && transaction.competence_month === selectedCycle).length === 0 ? (
             <div className="empty-state">
               <p>{t(CCK.transactionsEmpty)}</p>
             </div>
@@ -396,47 +438,146 @@ export default function CreditCardDetailPage() {
                 <tr>
                   <th>{t(CCK.tableHeaders.date)}</th>
                   <th>{t(CCK.tableHeaders.description)}</th>
-                  <th>{t(CCK.tableHeaders.type)}</th>
                   <th>{t(CCK.tableHeaders.installment)}</th>
+                  <th>{t(CCDK.purchaseDetails.totalPurchase)}</th>
                   <th>{t(CCK.tableHeaders.amount)}</th>
                 </tr>
               </thead>
               <tbody>
-                {transactions.map((transaction) => (
-                  <tr key={transaction.id}>
-                    <td>{formatDateString(transaction.date)}</td>
-                    <td>{transaction.description || "-"}</td>
-                    <td>
-                      {transaction.type === "credit_card_charge" ? t(CCK.transactionTypes.purchase) : t(CCK.transactionTypes.payment)}
-                    </td>
-                    <td>
-                      {transaction.installment_total && transaction.installment_total > 1
-                        ? `${transaction.installment_number}/${transaction.installment_total}`
-                        : "-"}
-                    </td>
-                    <td style={{ 
-                      color: transaction.type === "credit_card_charge" ? "var(--error)" : "var(--success)",
-                      fontWeight: 500 
-                    }}>
-                      <MoneyDisplay
-                        amountCents={Math.abs(transaction.amount_cents)}
-                        currencyCode={settings.currency}
-                        settings={fullSettings}
-                        primaryStyle={{ display: "inline" }}
-                        secondaryStyle={{ display: "inline", marginLeft: "0.25rem", fontSize: "0.7rem" }}
-                      />
-                    </td>
-                  </tr>
-                ))}
+                {(() => {
+                  const cycleKey = selectedCycle || currentCycleStart;
+                  const purchases = transactions.filter(
+                    (transaction) =>
+                      transaction.type === "credit_card_charge" && transaction.competence_month === cycleKey
+                  );
+                  const totalsByGroup = new Map<number, number>();
+                  purchases.forEach((transaction) => {
+                    if (transaction.installment_total && transaction.installment_total > 1) {
+                      const groupId = transaction.parent_transaction_id || transaction.id;
+                      totalsByGroup.set(groupId, (totalsByGroup.get(groupId) || 0) + Math.abs(transaction.amount_cents));
+                    }
+                  });
+
+                  return purchases.map((transaction) => {
+                    const isInstallment = transaction.installment_total && transaction.installment_total > 1;
+                    const groupId = transaction.parent_transaction_id || transaction.id;
+                    const totalPurchase = isInstallment ? totalsByGroup.get(groupId) || Math.abs(transaction.amount_cents) : Math.abs(transaction.amount_cents);
+                    const installmentLabel = isInstallment
+                      ? `${transaction.installment_number}/${transaction.installment_total}`
+                      : "-";
+                    const descriptionSuffix = isInstallment ? ` • em ${transaction.installment_total}` : "";
+
+                    return (
+                      <tr key={transaction.id}>
+                        <td>{formatDateString(transaction.date)}</td>
+                        <td>{`${transaction.description || "-"}${descriptionSuffix}`}</td>
+                        <td>{installmentLabel}</td>
+                        <td>
+                          <MoneyDisplay
+                            amountCents={totalPurchase}
+                            currencyCode={cardCurrency}
+                            settings={fullSettings}
+                            primaryStyle={{ display: "inline" }}
+                            secondaryStyle={{ display: "inline", marginLeft: "0.25rem", fontSize: "0.7rem" }}
+                          />
+                        </td>
+                        <td style={{ color: "var(--error)", fontWeight: 500 }}>
+                          <MoneyDisplay
+                            amountCents={Math.abs(transaction.amount_cents)}
+                            currencyCode={cardCurrency}
+                            settings={fullSettings}
+                            primaryStyle={{ display: "inline" }}
+                            secondaryStyle={{ display: "inline", marginLeft: "0.25rem", fontSize: "0.7rem" }}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  });
+                })()}
               </tbody>
             </table>
           )}
         </div>
 
+        <div className="card" style={{ marginTop: "2rem" }}>
+          <h2 style={{ fontSize: "1.25rem", fontWeight: 600, marginBottom: "1rem" }}>{t(CCDK.sections.futureInstallments)}</h2>
+          {(() => {
+            const cycleKey = selectedCycle || currentCycleStart;
+            const futureInstallments = transactions.filter(
+              (transaction) =>
+                transaction.type === "credit_card_charge" &&
+                transaction.installment_total &&
+                transaction.installment_total > 1 &&
+                transaction.competence_month &&
+                transaction.competence_month > cycleKey
+            );
+
+            if (futureInstallments.length === 0) {
+              return (
+                <div className="empty-state">
+                  <p>{t(CCK.transactionsEmpty)}</p>
+                </div>
+              );
+            }
+
+            const totalsByGroup = new Map<number, number>();
+            futureInstallments.forEach((transaction) => {
+              const groupId = transaction.parent_transaction_id || transaction.id;
+              totalsByGroup.set(groupId, (totalsByGroup.get(groupId) || 0) + Math.abs(transaction.amount_cents));
+            });
+
+            return (
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>{t(CCK.tableHeaders.date)}</th>
+                    <th>{t(CCK.tableHeaders.description)}</th>
+                    <th>{t(CCK.tableHeaders.installment)}</th>
+                    <th>{t(CCDK.purchaseDetails.totalPurchase)}</th>
+                    <th>{t(CCK.tableHeaders.amount)}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {futureInstallments.map((transaction) => {
+                    const groupId = transaction.parent_transaction_id || transaction.id;
+                    const totalPurchase = totalsByGroup.get(groupId) || Math.abs(transaction.amount_cents);
+                    const installmentLabel = `${transaction.installment_number}/${transaction.installment_total}`;
+                    return (
+                      <tr key={transaction.id}>
+                        <td>{formatDateString(transaction.date)}</td>
+                        <td>{transaction.description || "-"}</td>
+                        <td>{installmentLabel}</td>
+                        <td>
+                          <MoneyDisplay
+                            amountCents={totalPurchase}
+                            currencyCode={cardCurrency}
+                            settings={fullSettings}
+                            primaryStyle={{ display: "inline" }}
+                            secondaryStyle={{ display: "inline", marginLeft: "0.25rem", fontSize: "0.7rem" }}
+                          />
+                        </td>
+                        <td style={{ color: "var(--error)", fontWeight: 500 }}>
+                          <MoneyDisplay
+                            amountCents={Math.abs(transaction.amount_cents)}
+                            currencyCode={cardCurrency}
+                            settings={fullSettings}
+                            primaryStyle={{ display: "inline" }}
+                            secondaryStyle={{ display: "inline", marginLeft: "0.25rem", fontSize: "0.7rem" }}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            );
+          })()}
+        </div>
+
         <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={t(CCDK.modals.newPurchase.title)}>
           <form onSubmit={handleSubmit}>
             <div className="form-group">
-              <label className="label">{t(CCDK.modals.newPurchase.fields.amount)} ({settings.currency})</label>
+              <label className="label">{t(CCDK.modals.newPurchase.fields.amount)} ({cardCurrency})</label>
               <input
                 className="input"
                 type="text"
@@ -446,7 +587,7 @@ export default function CreditCardDetailPage() {
                   const cleaned = cleanMoneyInput(e.target.value);
                   setFormData({ ...formData, amount_cents: cleaned });
                 }}
-                placeholder="0"
+                placeholder={getMoneyPlaceholder(cardCurrency, locale)}
                 required
               />
             </div>
@@ -526,17 +667,23 @@ export default function CreditCardDetailPage() {
                 value={paymentData.account_id}
                 onChange={(e) => setPaymentData({ ...paymentData, account_id: parseInt(e.target.value) })}
                 required
+                disabled={paymentAccounts.length === 0}
               >
                 <option value="">{t(CCDK.modals.payInvoice.selectAccount)}</option>
-                {accounts.map((account) => (
+                {paymentAccounts.map((account) => (
                   <option key={account.id} value={account.id}>
                     {account.name}
                   </option>
                 ))}
               </select>
+              {paymentAccounts.length === 0 && (
+                <div style={{ fontSize: "0.75rem", color: "var(--warning)", marginTop: "0.25rem" }}>
+                  {t(CCDK.messages.noAccountsSameCurrency, { currency: cardCurrency })}
+                </div>
+              )}
             </div>
             <div className="form-group">
-              <label className="label">{t(CCDK.modals.payInvoice.fields.amount)} ({settings.currency}) - {t(CCK.paymentFields.amountPlaceholder)}</label>
+              <label className="label">{t(CCDK.modals.payInvoice.fields.amount)} ({cardCurrency}) - {t(CCK.paymentFields.amountPlaceholder)}</label>
               <input
                 className="input"
                 type="text"
@@ -546,7 +693,7 @@ export default function CreditCardDetailPage() {
                   const cleaned = cleanMoneyInput(e.target.value);
                   setPaymentData({ ...paymentData, amount_cents: cleaned });
                 }}
-                placeholder={currentInvoice ? formatMoney(currentInvoice.invoice_total_cents, settings.currency) : "0"}
+                placeholder={getMoneyPlaceholder(cardCurrency, locale)}
               />
             </div>
             <DatePicker
@@ -559,7 +706,7 @@ export default function CreditCardDetailPage() {
               <button type="button" className="btn btn-secondary" onClick={() => setIsPaymentModalOpen(false)}>
                 {t(AK.common.cancel)}
               </button>
-              <button type="submit" className="btn btn-primary">
+              <button type="submit" className="btn btn-primary" disabled={paymentAccounts.length === 0}>
                 {t(CCK.pay)}
               </button>
             </div>
