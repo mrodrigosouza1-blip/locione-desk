@@ -12,3 +12,7 @@ src-tauri/target/
 .env
 package-lock.json
 .apple-notary.env
+release/
+win-unpacked/
+*.exe
+*.blockmap
